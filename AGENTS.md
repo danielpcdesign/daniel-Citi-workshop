@@ -1065,10 +1065,28 @@ Vitest is the native fit and Jest needs extra ESM configuration.
   silently left `auth/function.py` and `_migrate/function.py` out of the total — it reported
   75% instead of the true 34%. A gate that silently excludes untested files is worse than
   no gate; `include_namespace_packages` is required, not optional, for this layout.
-- **First run (2026-09-23, uncommitted):** 17 tests pass (`backend/_shared/tests/`,
-  the AD-05 router), but the suite **exits 1** — total coverage is 34% against the 80%
-  gate, because `_shared/db.py`, `auth/function.py`, and `_migrate/function.py` have no
-  tests yet. The gate is working as designed.
+- **Integration test database — decided 2026-09-23: the dev database, not a separate test
+  database.** One PostgreSQL to stand up locally, not two. Made safe by the
+  `isolated_schema` fixture in `backend/conftest.py`: each DB test runs inside its own
+  throwaway schema (`test_<random>`), created before the test and dropped `CASCADE` after,
+  with code under test pointed at it via the libpq `PGOPTIONS=-c search_path=<schema>`
+  env var — production connection code in `_shared/db.py` is unchanged and untouched by a
+  test-only branch. Verified: 0 leftover `test_*` schemas and 0 rows touched in `public`
+  after a run. `backend/conftest.py` also aliases the vendored import name `shared` to the
+  `_shared` source package (tests exercise the coverage-counted code, independent of
+  `sync-shared.sh`) and provides `load_service`, loading each Lambda's `function.py` under
+  a unique module name; `pytest.ini` uses `--import-mode=importlib` because every service's
+  test file is named `test_function.py`. `.coveragerc` omits `backend/conftest.py`.
+- **Current status (2026-09-23, uncommitted):** 41 tests pass — 17 router
+  (`backend/_shared/tests/test_router.py`), 7 DB helper (`backend/_shared/tests/test_db.py`),
+  4 `auth` (`backend/auth/tests/test_function.py`), 13 `_migrate`
+  (`backend/_migrate/tests/test_function.py`: real `001_init` from scratch + idempotent
+  rerun, edited-file detection, failing-migration rollback, misnamed file, admin seeding —
+  once, normalised email, missing credentials x3, plaintext refused, registered email not
+  promoted — HTTP-shaped event refused, handler passthrough). Total backend coverage is
+  **100%**, the 80% gate passes, and the run exits `0`. Mutation spot-check: removing the
+  plaintext-hash guard fails `test_plaintext_password_is_refused`; decoding the whole path
+  before matching in the router fails 2 router tests. Both reverted after confirming.
 
 ### AD-12 · Error envelope and validation approach
 

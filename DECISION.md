@@ -64,6 +64,7 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 | Schema conventions | Codes not labels; `TEXT`+`CHECK` not `ENUM`; `BIGINT` identity keys; refresh tokens as sha256 | Simple migrations, readable ids, deterministic token lookup | 2026-09-23 |
 | Service-dir gitignore | Allow-list: only `*.py`, `requirements.txt`, `tests/` tracked | pip installs into the service dir; package names cannot be enumerated | 2026-09-22 |
 | Admin seed input | Terraform receives a bcrypt hash, never the password, via the `_migrate` Lambda's invocation input (not env vars); deploy fails when no admin exists and the `TF_VAR_...` vars are unset | Terraform state stores variable values in plain text; a deploy that could silently ship with no admin would leave nobody able to ever promote anyone | 2026-09-23 |
+| Integration test database | Database-backed backend tests run against the **dev database**, not a separate test database; each test gets a throwaway PostgreSQL schema (`test_<random>`) created/dropped by the `isolated_schema` fixture (`backend/conftest.py`), with code under test pointed at it via `PGOPTIONS=-c search_path=<schema>` | One PostgreSQL to stand up locally, not two; the schema-per-test isolation keeps writes out of `public` without touching production connection code | 2026-09-23 |
 
 ## Rules settled beneath a parent decision
 

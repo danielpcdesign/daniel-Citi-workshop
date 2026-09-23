@@ -32,7 +32,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M10 | Dashboards and reporting | Per-persona; counts by status/priority/assignee, hotspots, MTTA/MTTR | Not started |
 | M11 | Visual workflow | Per-incident stepper and a status-grouped board | Not started |
 | M12 | Responsive and accessible UI | Mobile and desktop, consistent interaction states | Not started |
-| M13 | Test suites | To the coverage targets in [Testing](#testing) | Not started |
+| M13 | Test suites | To the coverage targets in [Testing](#testing) | In progress — backend: 41 tests pass, 100% coverage, 80% gate passes (`.venv/bin/pytest`, 2026-09-23, uncommitted); mutation spot-check confirms tests fail when the code they cover is broken. Frontend (Vitest/RTL) and E2E (Cypress) not started |
 | M14 | Cloud deployment | Verified working end to end on AWS, not only in LocalStack | Not started |
 
 **Ordering note.** M2 precedes everything because of one schema decision that cannot be retrofitted — see [The one irreversible decision](#the-one-irreversible-decision). M3 and M4 precede M5–M8 because retrofitting an identity into endpoints written without one is the single most expensive reordering available here, and the reasoning is in [Security](#security--what-is-and-is-not-enforced).
@@ -371,7 +371,13 @@ python3.13 -m venv .venv
 - **Namespace-package gotcha:** service directories have no `__init__.py`, so `.coveragerc` sets `include_namespace_packages = true` — without it, coverage.py silently dropped `auth/function.py` and `_migrate/function.py` from the total (75% reported vs. the true 34%).
 - **SQL constraint suite** (separate from pytest, `psql` against a live database) is documented in [Where each rule is enforced](#where-each-rule-is-enforced).
 
-**Current status (2026-09-23, uncommitted):** `.venv/bin/pytest` runs 17 tests, all passing, all in `backend/_shared/tests/test_router.py` (the AD-05 router, 100% covered). Total backend coverage is **34%**, so the run **exits 1** against the 80% gate — working as designed, not a bug. Untested: `backend/_shared/db.py`, `backend/auth/function.py`, `backend/_migrate/function.py`.
+**Current status (2026-09-23, uncommitted):** `.venv/bin/pytest` runs **41 tests, all passing** — 17 in `backend/_shared/tests/test_router.py` (AD-05 router), 7 in `backend/_shared/tests/test_db.py`, 4 in `backend/auth/tests/test_function.py`, 13 in `backend/_migrate/tests/test_function.py` (real `001_init` applied from scratch and re-applied idempotently, edited-file detection, failing-migration rollback, misnamed file, admin seeding, email normalisation, missing-credentials variants, plaintext-hash refusal, registered-email-not-promoted, HTTP-shaped event refusal, handler passthrough). Total backend coverage is **100%**, so the 80% gate passes; the run exits `0`.
+
+**Database-backed tests run against the dev database, not a separate test database** — a deliberate choice, so there is only ever one PostgreSQL to stand up locally. Safety comes from the `isolated_schema` fixture in `backend/conftest.py`: each DB test gets its own throwaway schema (`test_<random>`), created before the test and dropped (`CASCADE`) after, and code under test is pointed at it via the libpq `PGOPTIONS=-c search_path=<schema>` environment variable — production connection code (`_shared/db.py`) is never touched or branched for tests. Verified: 0 leftover `test_*` schemas and 0 rows touched in `public` after a run. Needs the local PostgreSQL reachable at `172.17.0.1` (the same Docker-bridge address Lambdas use); override with `TEST_POSTGRES_HOST` if that address doesn't apply.
+
+`backend/conftest.py` also aliases the vendored import name `shared` to the `_shared` source package, so tests exercise the coverage-counted code and don't depend on `bin/sync-shared.sh` having run, and provides `load_service`, which loads each Lambda's `function.py` under a unique module name (every service's test file is `test_function.py`, so `pytest.ini` sets `--import-mode=importlib`). `.coveragerc` omits `backend/conftest.py` itself from coverage.
+
+**Mutation spot-check (2026-09-23):** removing the plaintext-hash guard in `_migrate` makes `test_plaintext_password_is_refused` fail; making the router decode the whole path before matching makes 2 router tests fail. Both changes were reverted after confirming the failure — evidence the suite catches real breakage, not just that it runs.
 
 **No CI pipeline exists yet.** Thresholds are enforced wherever the tests are run (locally, in `.coveragerc` / Vitest config), not by a separate CI check.
 
