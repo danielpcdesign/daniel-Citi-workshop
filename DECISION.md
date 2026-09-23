@@ -1,0 +1,58 @@
+# Decisions
+
+Every settled decision, in register order, with a one-line reason. **`AGENTS.md` is the
+source of truth** — options weighed, rejected alternatives, and full reasoning live there.
+This file is the index: if the two disagree, `AGENTS.md` wins and this file is the bug.
+
+**Recorded** says when a decision entered the record: `pre-session` means it was already
+in commit `af53415`; a date means it was settled in a working session on that day.
+
+## Architecture decisions (AD register)
+
+| ID | Decision | Choice | Why | Recorded |
+|---|---|---|---|---|
+| AD-00 | Database | PostgreSQL (Aurora in cloud); no MongoDB | Relational data with joins and aggregates; one engine, not two | pre-session |
+| AD-01 | Service decomposition | `auth`, `incidents`, `facilities`, `engineers`; `reports` at M10 | Domain seams score on Design; notes share incidents' ownership check, so they deploy with it | 2026-09-23 |
+| AD-02 | Shared-code packaging | Vendor `backend/_shared/` into each service at prebuild; copies gitignored | Only physical files satisfy both the cloud zip and LocalStack's hot-reload mount | pre-session |
+| AD-07 | Auth mechanism | Self-issued JWT, verified in every handler, with expiry | No new infra (not Cognito/OAuth); a required deliverable, done for real | pre-session |
+| AD-07a | Signing algorithm | RS256 | Only `auth` can mint tokens; other services verify with a public key | pre-session |
+| AD-07b | Signing key storage | Secrets Manager (cloud); env var dev key when `IS_LOCAL` | IAM grant already exists; only `auth` needs the secret | pre-session |
+| AD-07c | Password hashing | bcrypt | argon2id's memory-hardness is a direct cost at 128 MB Lambda | pre-session |
+| AD-07d | Refresh tokens | Rotated on every use, stored hashed, reuse detection revokes the family | Makes a stolen refresh token detectable | pre-session |
+| AD-08a | Token storage | Refresh token in httpOnly `SameSite=Strict` cookie; access token in memory | Script cannot read the long-lived credential; no CSRF surface on API calls | pre-session |
+| AD-08b | Origin sealing | Function URLs `AWS_IAM` behind a CloudFront OAC | Only the distribution can invoke a Lambda; direct calls get 403 | pre-session |
+| AD-08c | Access-token transport | `X-Access-Token` header, not `Authorization` | OAC's SigV4 signature occupies `Authorization` | pre-session |
+| AD-18 | Visual workflow | MUI `Stepper` per incident + status-grouped board on Admin/Engineer dashboard | Stepper answers the requester, board answers the dispatcher; drag only once AD-17 is enforced server-side | 2026-09-23 |
+
+## Decided without an AD number
+
+| Decision | Choice | Why | Recorded |
+|---|---|---|---|
+| Auth sequencing | Authentication (M3) and authorization (M4) before any CRUD | Retrofitting identity into existing endpoints is the costliest reordering | pre-session |
+| Backend language | Python | Mandated | pre-session |
+| Frontend stack | React + Material UI + React Responsive | Mandated | pre-session |
+| IaC / deploy | Terraform + provided `bin/` scripts | Provided scaffold | pre-session |
+| Product type | Incident ticketing (service desk), not a planning board | Requesters report, admins dispatch, engineers resolve; metrics are MTTA/MTTR | 2026-09-23 |
+| First service (M1) | `auth` as the hello-world service | Exists under any AD-01 outcome, so nothing is built to be thrown away | 2026-09-22 |
+| Dev proxy headers | `bin/proxy-server.js` forwards `x-access-token` and `cookie` | It dropped both, making every local request anonymous | 2026-09-22 |
+| Local dependency build | `start-dev.sh` pip targets Python 3.13 / `manylinux2014_x86_64` | Host `pip` belongs to 3.14; compiled wheels failed to import in Lambda | 2026-09-22 |
+| DB credentials | Read with `os.environ[...]`, no fallbacks; `sslmode=require` when not local | Terraform always injects them, so a missing one is a deploy bug, not a default | 2026-09-22 |
+| Service-dir gitignore | Allow-list: only `*.py`, `requirements.txt`, `tests/` tracked | pip installs into the service dir; package names cannot be enumerated | 2026-09-22 |
+
+## Settled beneath open decisions
+
+These are fixed, but the parent decision is still `OPEN`.
+
+| Parent | Rule | Why | Recorded |
+|---|---|---|---|
+| AD-17 | Notes writable on every status except `Closed` | "Open incidents" means not yet closed; otherwise the requester is locked out once work starts | 2026-09-23 |
+| M8 | One chronological conversation per incident, no reply nesting | The personas describe a two-way conversation, not a forum | 2026-09-23 |
+| AD-09 | Notes are soft-deleted, never hard-deleted | Keeps the record behind "how effectively are employees informed" | 2026-09-23 |
+| AD-17 | `Blocked` reason stored on the status-history row **and** posted as a note | History is the undeletable record the report reads; the note tells the requester | 2026-09-23 |
+| AD-09 | Only the author edits a note; author or Facility Admin soft-deletes | Admins moderate but never rewrite someone else's words | 2026-09-23 |
+
+## Still open
+
+AD-03 · AD-04 · AD-05 · AD-06 · AD-09 · AD-10 · AD-11 · AD-12 · AD-13 · AD-14 · AD-15 ·
+AD-16 · AD-17 · AD-19 · AD-20 · AD-21 · AD-22 — see `AGENTS.md` → Pending architecture
+decisions.

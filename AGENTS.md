@@ -74,6 +74,7 @@ losing every incident's history.
 | # | Decision | Choice |
 | --- | --- | --- |
 | AD-00 | Database | **PostgreSQL** (Aurora in cloud). MongoDB/DocumentDB is **not used** — do not add `pymongo`, `MONGO_*` handling, or `TF_VAR_aws_mongo_enabled`. |
+| AD-01 | Service decomposition | **Domain split: `auth`, `incidents` (incl. notes, transitions, history, assignment), `facilities`, `engineers`; `reports` added at M10.** Notes are their own entity and table, deployed inside `incidents` with nested routes. |
 | AD-02 | Shared-code packaging | **Vendor `backend/_shared/` into each service directory as a prebuild step**, gitignoring the copies. Physical presence is the only thing that satisfies both the zip builder and the LocalStack hot-reload mount. Not a Lambda layer, not a second `source_path` entry. |
 | AD-07 | Auth mechanism | **Self-issued JWT, implemented for real** — signed token, carried in `X-Access-Token` (AD-08c), verified in every handler, with expiry. Not OAuth, not Cognito. A sign-in that returns a user without issuing a token does not satisfy this. |
 | AD-07a | Signing algorithm | **RS256.** Only the `auth` service holds the private key; all other services verify with the public key, distributed as a plain env var. |
@@ -83,12 +84,13 @@ losing every incident's history.
 | AD-08a | Token storage | **Refresh token in an httpOnly cookie** (`Secure; SameSite=Strict; Path=/api/auth/refresh`), same-origin via CloudFront. **Access token in memory only.** Single-flight refresh. |
 | AD-08b | Origin sealing | **Function URLs move to `authorization_type = "AWS_IAM"` behind a CloudFront OAC** (`origin_type = "lambda"`), so only the distribution can invoke them. |
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
+| AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
 | — | Auth sequencing | **Authentication and authorization are built before the CRUD they protect**, not retrofitted afterwards. Milestones M3–M4 in `README.md`. |
 | — | Backend language | Python (mandated by the requirements + recommended by the guides) |
 | — | Frontend | React + Material UI + React Responsive (mandated) |
 | — | IaC / deploy | Terraform + shell scripts in `bin/` (provided) |
 
-> **Domain guard.** This is a **task-tracking** application — incidents, facilities, engineers, notes. It is not a banking application. No accounts, balances, deposits, withdrawals, or monetary rules belong anywhere in it. Reference material from that domain may be borrowed for document *structure* only, never for domain logic or security posture.
+> **Domain guard.** This is an **incident ticketing (service-desk)** application — employees report facility and technology issues, admins dispatch them, engineers resolve them. It is not a project-planning tool (no backlogs, sprints, or story points) and not a banking application. No accounts, balances, deposits, withdrawals, or monetary rules belong anywhere in it. Reference material from that domain may be borrowed for document *structure* only, never for domain logic or security posture.
 
 Everything else of consequence is still open — see
 [Pending architecture decisions](#pending-architecture-decisions).
@@ -326,7 +328,7 @@ but **none is settled until confirmed** — record the outcome here and in the R
 | ID | Decision | Status |
 | --- | --- | --- |
 | AD-00 | Database engine | **DECIDED — PostgreSQL** |
-| AD-01 | Service decomposition | OPEN |
+| AD-01 | Service decomposition | **DECIDED — domain split, five services** |
 | AD-02 | Shared-code packaging | **DECIDED — vendor `_shared/` into each service** |
 | AD-03 | Schema ownership and migrations | OPEN |
 | AD-04 | DB access layer and connection reuse | OPEN |
@@ -348,7 +350,7 @@ Domain-specific, from the facility-incident problem statement:
 | ID | Decision | Status |
 | --- | --- | --- |
 | AD-17 | Incident state machine and transition authority | OPEN |
-| AD-18 | Visual workflow representation | OPEN |
+| AD-18 | Visual workflow representation | **DECIDED — stepper + status board** |
 | AD-19 | Dashboard and reporting strategy | OPEN |
 | AD-20 | Priority and escalation model | OPEN |
 | AD-21 | Registration, `acme.inc` email restriction, and persona assignment | OPEN |
@@ -370,6 +372,66 @@ closely tied to assignment — those two are the most defensible merge candidate
   names microservices as a learning objective and Design is a scored dimension; a single
   monolithic handler forfeits that.
 - **Blocks:** AD-02, AD-03, AD-06.
+
+#### DECIDED — split by domain (option C)
+
+| Service | Owns | Lands |
+| --- | --- | --- |
+| `auth` | registration, sign-in, refresh, sign-out, users | M1 (skeleton), M3 |
+| `incidents` | incidents, **ticket notes**, status transitions + history, assignment | M5, M7, M8 |
+| `facilities` | buildings, floors, seats | M6 |
+| `engineers` | engineer profiles | M7 |
+| `reports` | read-only per-persona aggregates | M10 — not created before then |
+
+- **Notes live in `incidents`.** Every notes permission check reduces to "can this user
+  see the parent incident?", so a separate service would duplicate the ownership check
+  AGENTS.md identifies as the likeliest privilege-escalation leak. Notes keep their own
+  table (`ticket_notes`, FK to `incidents`), validation model, and tests — separate
+  entity, not separate deployment.
+- **Nested routes:** `/api/incidents/{id}/notes[/{noteId}]`. Same status codes as the API
+  contract; the path shape is a stated deviation from its flat `/<service>/{id}`, to be
+  documented in the README.
+- **Assignment lives in `incidents`** — it mutates an incident and is a workflow transition
+  under AD-17; engineer existence is enforced by FK, not a service call.
+- **One shared database.** These are separately deployed modules over a shared schema, not
+  database-per-service microservices. Cross-entity reads are SQL joins, never
+  service-to-service calls.
+- **Naming rule:** CloudFront behaviours are `/api/<service>*` with no trailing slash, so no
+  service name may be a prefix of another.
+- **Rejected:** one-service-per-entity (duplicated ownership checks for `notes`); a single
+  `api` service (forfeits the domain-modularity Design is scored on).
+
+#### Ticket notes — settled rules
+
+Resolves the ambiguities AD-01 left open. Recorded here because notes live in `incidents`;
+AD-09 and AD-17 point back to this list.
+
+- **Writable on every status except `Closed`.** "Add notes to open incidents" reads as
+  *not yet closed*, not *status = `Open`* — otherwise the requester is locked out of the
+  conversation the moment an engineer picks the ticket up. `Closed` is read-only.
+- **One chronological conversation per incident.** No reply nesting, no `parent_note_id`.
+  The M8 word "threaded" means *a thread*, ordered by `created_at`.
+- **Soft delete.** A deleted note keeps its row with `deleted_at` / `deleted_by` set and
+  its body hidden; the conversation shows that a note was removed. Hard deletion would
+  erase the record behind "how effectively are employees informed".
+- **The `Blocked` reason is stored twice, with different jobs.** The status-history row's
+  `reason` column is the **record** — append-only, never edited or deleted, and what the
+  "blocked, and why?" report reads. The transition also posts the reason as a note, which
+  is the **notification** — an ordinary note, authored by whoever blocked the ticket.
+  Editing or deleting that note never touches the history row, so the two may diverge;
+  history wins.
+- **Edit and delete authority:**
+
+  | Action | Note author | Facility Admin (not author) | Anyone else |
+  | --- | --- | --- | --- |
+  | Edit | ✓ own notes only | ✗ | ✗ |
+  | Soft-delete | ✓ own notes only | ✓ any note | ✗ |
+
+  Admin deletion is moderation; admins never edit someone else's words. Enforced by the
+  shared authorization helper (AD-09), not inline in the handler.
+- **Still open, for M8:** whether an edit is visible (`edited_at` shown as "edited") —
+  recommended, since a silently rewritten note undermines the conversation as a record;
+  whether `Closed` read-only also blocks admin moderation of notes on closed incidents.
 
 ### AD-02 · Shared-code packaging
 
@@ -758,6 +820,9 @@ no gain.
 - **Recommendation:** roles as claims, one shared decorator handling role *and* ownership,
   and a single matrix definition the frontend reads — duplicated permission logic across
   layers is the most likely place to leak a privilege-escalation bug.
+- **Settled beneath this decision** (AD-01 → Ticket notes): notes are soft-deleted, never
+  hard-deleted; only the author edits a note; the author or a Facility Admin may
+  soft-delete it. The rest of the decision stays `OPEN`.
 
 ### AD-10 · Frontend dependency set
 
@@ -849,6 +914,10 @@ CloudWatch retention is 7 days and the example uses plain `logging` with no stru
   one table answers the acknowledge/assign/resolve timing questions and the blocked-reason
   question at once.
 - **Depends on:** AD-09 (the same decorator should carry transition authority).
+- **Settled beneath this decision** (AD-01 → Ticket notes): `Blocked` requires a reason,
+  stored on the status-history row (the record) **and** posted as a note (the
+  notification); notes are writable on every status except `Closed`. The rest of the
+  decision stays `OPEN`.
 
 ### AD-18 · Visual workflow representation
 
@@ -863,6 +932,23 @@ An explicit MVP capability, and the most under-specified one.
   board on the Admin/Engineer dashboard. The stepper satisfies the literal requirement for a
   low cost; the board is where it earns Design points. Drag-to-transition only if AD-17 is
   already enforced server-side.
+
+#### DECIDED — stepper per incident, status board per dashboard
+
+- **Stepper** on the incident detail view, for every persona. It answers the requester's
+  question — "where is my ticket?" — which is the service-desk half of the product.
+- **Status-grouped board** on the Admin/Engineer dashboard. It answers the dispatcher's
+  question — "what is open, and what is stuck?" It is a triage view, not a planning board
+  (see the Domain guard).
+- **Drag-to-transition is conditional**, not promised: only after AD-17's transition table
+  is enforced server-side, and every drop goes through the same transition endpoint as a
+  button would. The server stays the only authority; the board never decides legality.
+- **`Blocked` is a detour, not a step.** The stepper renders the linear path and shows
+  `Blocked` as an error state on the current step (MUI `Step` `error`), with the reason
+  from the status history — not as a fourth box between `In Progress` and `Resolved`.
+- **Not settled here:** the drag-and-drop library (AD-10, and only if drag is built); which
+  columns or filters the Engineer's board shows versus the Admin's (AD-19).
+- **Lands at:** M11.
 
 ### AD-19 · Dashboard and reporting strategy
 

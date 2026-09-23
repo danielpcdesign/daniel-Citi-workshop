@@ -216,11 +216,13 @@ The same table answers *"which incidents are escalated or blocked, and why"* —
 
 ## Decisions
 
-Open architecture decisions live in **`AGENTS.md` → Pending architecture decisions**, as AD-00 through AD-22 with options, a recommendation, and what each blocks. One is settled:
+Open architecture decisions live in **`AGENTS.md` → Pending architecture decisions**, as AD-00 through AD-22 with options, a recommendation, and what each blocks. Settled so far:
 
 | ID | Decision | Choice |
 |---|---|---|
 | AD-00 | Database | **PostgreSQL.** MongoDB/DocumentDB is not used; `pymongo` and every `MONGO_*` path are removed from services derived from the template. |
+| AD-01 | Service decomposition | **Split by domain:** `auth`, `incidents`, `facilities`, `engineers`, and `reports` from M10. Ticket notes are their own entity but are deployed in `incidents` at `/api/incidents/{id}/notes`, because every notes permission check is the parent incident's check. All services share one database. |
+| AD-18 | Visual workflow | **MUI `Stepper` on each incident** (the requester's "where is my ticket?") **plus a status-grouped board** on the Admin/Engineer dashboard (the dispatcher's "what is stuck?"). Drag-to-transition only after the workflow is enforced server-side. |
 
 The rest are open. The rule is that an open decision gets settled deliberately and recorded, not resolved silently in a commit — the register is the artifact that makes trade-offs explainable afterwards, which is half of what the workshop grades.
 

@@ -104,5 +104,6 @@ Carried over from the previous convention:
 - Did I settle an `OPEN` decision without asking? If so, back it out or get the call now.
 - Did I explain the *why*, and ask the user to play it back?
 - Did this turn resolve or change anything in the `AGENTS.md` decision register? Update it in the same turn.
+- Did a decision, milestone, service, or known defect change? Delegate to the `docs-keeper` agent with a summary of what changed, so `AGENTS.md`, `DECISION.md`, and `README.md` stay in sync.
 - Tests still passing, and is the new code covered? Targets are in `AGENTS.md` → Testing.
 - If working in fallback mode (§3), did I label unrun code as unverified?
