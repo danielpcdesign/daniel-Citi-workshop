@@ -93,6 +93,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
+| AD-21 | Registration and roles | **Self-registration creates Employees only** (exact `acme.inc` domain match, server-side; no email verification). Admins promote users to Engineer (by creating the profile) or Admin. First admin seeded by `_migrate` from Terraform variables. `users.role` + one-to-one `engineer_profiles`. Demotion auto-unassigns active tickets. |
 | AD-22 | Facility hierarchy | **Three tables** (`buildings`, `floors`, `seats`); incident has required `building_id`, optional `floor_id`, optional `seat_id` (needs a floor), kept consistent by composite FKs. Soft delete via `archived_at`. No seat occupants. |
 | — | Auth sequencing | **Authentication and authorization are built before the CRUD they protect**, not retrofitted afterwards. Milestones M3–M4 in `README.md`. |
 | — | Backend language | Python (mandated by the requirements + recommended by the guides) |
@@ -362,7 +363,7 @@ Domain-specific, from the facility-incident problem statement:
 | AD-18 | Visual workflow representation | **DECIDED — stepper + status board** |
 | AD-19 | Dashboard and reporting strategy | OPEN |
 | AD-20 | Priority and escalation model | OPEN |
-| AD-21 | Registration, `acme.inc` email restriction, and persona assignment | OPEN |
+| AD-21 | Registration, `acme.inc` email restriction, and persona assignment | **DECIDED — Employee-only registration, promotion, seeded admin** |
 | AD-22 | Facility hierarchy modelling | **DECIDED — three tables, composite FKs, soft delete** |
 
 ### AD-01 · Service decomposition
@@ -907,7 +908,8 @@ no gain.
 - **First, reconcile the role sets.** The problem statement mandates three personas
   (Employee, Facility Admin, Engineer). `docs/full-stack.md` offers a different generic
   table (Admin / Manager / Contributor / Viewer) as an *example*. The personas win; treat
-  the guide's table as illustrative only. Decide whether a fourth super-admin role is needed
+  the guide's table as illustrative only. *(Answered by AD-21: no fourth role — the first
+  admin is seeded.)* Decide whether a fourth super-admin role is needed
   to bootstrap the first Facility Admin.
 - **Decide:** role carried as a JWT claim vs looked up per request; a single shared
   `@requires(role)` decorator vs inline checks; and where the role-to-permission matrix
@@ -1178,6 +1180,36 @@ The statement explicitly delegates this: "request or manage incident priority/es
   via the schema/migration step. Treat an engineer profile as a row linked to a user account
   rather than a duplicate identity — otherwise assignment and login drift apart.
 - **Depends on:** AD-03 (seeding), AD-07.
+
+#### DECIDED — Employee-only registration, promotion for other roles, seeded first admin (2026-09-23)
+
+- **Domain check, server-side, exact match.** Email is trimmed and lowercased; the part
+  after the single `@` must equal `acme.inc`. Rejects `x@acme.inc.evil.com`,
+  `x@notacme.inc` (why not a suffix check), and `x@mail.acme.inc` (no subdomains). Unique
+  index on the lowercased email. The frontend check is convenience only.
+- **No email verification.** No email infrastructure in `infra/`; already a stated cut in
+  `README.md` → Deliberately not done.
+- **Registration produces Employees only.** Any `role` field in the request is ignored.
+- **Engineer:** a Facility Admin promotes an existing user by creating their engineer
+  profile; role change and profile insert in one transaction (AD-04). Admins never set
+  another user's password, so no forced-reset flow is needed.
+- **Facility Admin:** the first is **seeded by the private `_migrate` Lambda** (AD-03),
+  only if no admin exists, from an email and bcrypt hash supplied as Terraform variables
+  from the environment — never committed. Nothing public can trigger it. Further admins
+  are promoted by an existing admin. **No fourth super-admin role** (answers AD-09's
+  bootstrap question).
+- **Data model:** `users.role` ∈ {`employee`, `engineer`, `admin`}, one role per user.
+  `engineer_profiles.user_id` is a unique FK — one-to-one — holding engineer-only fields
+  (M7). **Assignment references the user**, so login identity and assignee cannot drift.
+- **Role changes take effect at the next access-token refresh** (minutes), since the role
+  travels as a claim (pending AD-09).
+- **Demoting an engineer auto-unassigns their active tickets**, in the same transaction as
+  the role change: every `Open`, `In Progress`, or `Blocked` incident assigned to them moves
+  to `Unassigned` (AD-17), with a system-supplied reason ("assignee removed from the
+  engineer role") stored on the history row and posted as a note; the actor is the admin
+  who demoted them. `Resolved` and `Closed` incidents keep their assignee — the work is
+  done, and moving a `Resolved` ticket back would undo the resolution. *(Scope of
+  "currently assigned" is an interpretation; confirm.)*
 
 ### AD-22 · Facility hierarchy modelling
 
