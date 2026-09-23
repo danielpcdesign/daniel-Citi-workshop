@@ -64,7 +64,7 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 
 ## Rules settled beneath a parent decision
 
-Fixed rules recorded under a parent. AD-17 has since closed; AD-09 and M8 are still open.
+Fixed rules recorded under a parent. AD-17 has since closed; AD-09, AD-12, and M8 are still open.
 
 | Parent | Rule | Why | Recorded |
 |---|---|---|---|
@@ -80,6 +80,7 @@ Fixed rules recorded under a parent. AD-17 has since closed; AD-09 and M8 are st
 | AD-21 | Engineers-only assignment is enforced in the `incidents` service, not the DB (`assignee_id` → `users`) | An FK to `engineer_profiles` would block demotion while closed tickets reference the engineer | 2026-09-23 |
 | AD-22 | "Not archived" is enforced in the services, not the DB; name uniqueness is DB-enforced among non-archived rows | FKs prove existence, not state; partial unique indexes let an archived name be reused | 2026-09-23 |
 | AD-09 | Only the author edits a note; author or Facility Admin soft-deletes | Admins moderate but never rewrite someone else's words | 2026-09-23 |
+| AD-12 | A PostgreSQL FK violation (`23503`) reaching the error handler maps to `400`, not `500` | The service validates locations first for a precise message; the FK is only the backstop, so reaching it means a caller error the service missed | 2026-09-23 |
 
 ## Still open
 

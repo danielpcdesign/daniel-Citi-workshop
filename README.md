@@ -21,7 +21,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | # | Milestone | Scope | State |
 |---|---|---|---|
 | M1 | Environment validated | VDI, `start-dev.sh`, hello-world service reachable on `:3001`, frontend on `:3000` | Done locally — `auth` answers through `:3001`, `X-Access-Token` reaches the handler. Cloud header check under OAC pending (M14) |
-| M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | In progress — `001_init` applied locally through Terraform; 18 constraint cases verified. First-admin seeding and a cloud apply pending |
+| M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | In progress — `001_init` applied locally through Terraform; 18 database-constraint cases pass (`backend/_migrate/tests/constraints.sql`). First-admin seeding and a cloud apply pending |
 | M3 | Authentication | Registration gated to `acme.inc`, password hashing, JWT issue and verify | Not started |
 | M4 | Authorization | Three personas, role **and** row-level ownership, one shared enforcement point | Not started |
 | M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | Not started |
@@ -247,6 +247,12 @@ The database enforces what it can express; everything else has exactly one owner
 | **No incident on an archived building, floor, or seat; no floor or seat under an archived parent** | **`incidents` / `facilities` services** — a foreign key proves a row exists, not that it is active |
 | Who may make which status change (AD-17) | `incidents` service (`workflow.py`) |
 | Role and ownership checks (AD-09) | Shared mechanism in `_shared/`, per-service policy |
+
+Every database row in this table is exercised by `backend/_migrate/tests/constraints.sql` — 18 cases, run inside one transaction and rolled back, exiting non-zero on the first case that misbehaves:
+
+```sh
+psql -h 172.17.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -f backend/_migrate/tests/constraints.sql
+```
 
 The schema itself is in `backend/_migrate/migrations/`; a read-only snapshot for reading is `backend/_migrate/schema.snapshot.sql`, regenerated after each migration with `pg_dump --schema-only`.
 

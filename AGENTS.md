@@ -636,8 +636,8 @@ expected to use).
 - **Still unverified — cloud only:** that `_migrate` reaches Aurora through the VPC
   (LocalStack returns no subnets for any function, services included), and that
   `psql` from the VDI really cannot reach Aurora.
-- **Not decided here:** table designs (M2, AD-17, AD-22) and seeding the first Facility
-  Admin (AD-21).
+- **Not decided here:** seeding the first Facility Admin (AD-21) — table designs are now
+  decided below, in `001_init`.
 
 #### Schema decisions for `001_init` (2026-09-23)
 
@@ -1014,6 +1014,11 @@ The guide demands a "consistent format" and never specifies one.
 - **Recommendation:** Pydantic v2 models as the single source of truth for request shapes,
   mapped to 400 responses by one shared error handler. The frontend renders `fields` beside
   the offending inputs.
+
+- **Settled beneath this decision (2026-09-23):** a PostgreSQL foreign-key violation
+  (`23503`) reaching the shared error handler maps to `400`, not `500` — it is a caller
+  error the service's own validation missed. The envelope shape and validation approach
+  stay `OPEN`.
 
 ### AD-13 · Search, filter, and pagination design
 
