@@ -341,6 +341,8 @@ for req in "$PROJECT_ROOT"/backend/*/requirements.txt; do
     HASH_FILE="$svc_dir/.pip_installed"
     if [ "$(cat "$HASH_FILE" 2>/dev/null)" = "$REQS_HASH" ]; then
         echo -e "  pip requirements for $(basename "$svc_dir") already up to date, skipping..."
+        # still regenerate: dirs installed before pip-ignore.sh existed need their list too
+        "$SCRIPT_DIR/pip-ignore.sh" "$svc_dir"
         continue
     fi
     echo -e "  Installing pip requirements for $(basename "$svc_dir")..."
@@ -349,6 +351,8 @@ for req in "$PROJECT_ROOT"/backend/*/requirements.txt; do
         --python-version 3.13 --platform manylinux2014_x86_64 --only-binary=:all: \
         -r "$req"; then
         echo "$REQS_HASH" > "$HASH_FILE"
+        # ignore exactly what pip just installed, for git and for coverage (AD-02)
+        "$SCRIPT_DIR/pip-ignore.sh" "$svc_dir"
     else
         echo -e "  ✗ pip install failed for $(basename "$svc_dir"), will retry next run"
     fi

@@ -2,3 +2,5 @@
 -r backend/_shared/requirements.txt
 pytest==8.3.4
 pytest-cov==6.0.0
+# omits each service's pip-installed files from coverage (AD-02); see tools/coverage-pip-omit
+./tools/coverage-pip-omit

@@ -265,9 +265,8 @@ tfplan
 !/backend/[!_]*/requirements.txt
 !/backend/[!_]*/tests/
 
-# pip can install a dependency as a single top-level module, which the *.py allow-list above would track.
-# listed explicitly; see AGENTS.md AD-02 for the open follow-up to make this automatic
-/backend/*/typing_extensions.py
+# pip can install a dependency as a single top-level module, which the *.py allow-list above would
+# track; bin/pip-ignore.sh writes each service's own generated .gitignore from pip's RECORD files
 
 # vendored copies of backend/_shared (AD-02, bin/sync-shared.sh); _shared itself is the only tracked copy
 /backend/*/shared/

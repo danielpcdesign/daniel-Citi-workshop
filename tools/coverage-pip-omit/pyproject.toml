@@ -1,0 +1,12 @@
+# local coverage.py plugin, installed into .venv by requirements-dev.txt so coverage can import it
+# before pytest sets up its own paths (pytest-cov starts coverage first)
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coverage-pip-omit"
+version = "1.0.0"
+
+[tool.setuptools]
+py-modules = ["coverage_pip_omit"]

@@ -1,13 +1,13 @@
 [run]
 source = backend
+# adds each service's pip-installed files (from bin/pip-ignore.sh) to omit at run time
+plugins = coverage_pip_omit
 # count only our own top-level modules; nested dirs are tests, vendored shared/ copies, or
 # pip packages installed into a service dir for hot-reload (same rule as the .gitignore allow-list)
 omit =
     backend/*/*/*
     backend/_examples/*
     backend/conftest.py
-    # a pip-installed single-module dependency, not our code (same rule as .gitignore)
-    backend/*/typing_extensions.py
 
 [report]
 # service dirs have no __init__.py; without this, an untested service is silently left out of the total

@@ -393,6 +393,10 @@ python3.13 -m venv .venv
 
 **No CI pipeline exists yet.** Thresholds are enforced wherever the tests are run (locally, in `.coveragerc` / Vitest config), not by a separate CI check.
 
+### Local gotcha: deploys fail until the first admin is configured
+
+Until `TF_VAR_bootstrap_admin_email` and `TF_VAR_bootstrap_admin_password_hash` are set (see First admin above), any deploy against a database with no admin fails at the seeding step — by design. `start-dev.sh` treats a failed deploy as a LocalStack problem and **restarts LocalStack before retrying**, which fails the same way. Set the two variables once and this never occurs.
+
 ## Deliberately not done
 
 Recorded so the gaps are on the record rather than implied by silence. Each is a scope decision with a reason:

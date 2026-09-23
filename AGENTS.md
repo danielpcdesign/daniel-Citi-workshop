@@ -554,11 +554,17 @@ and the allow-list (`!/backend/[!_]*/*.py`) tracks every top-level `.py`, and co
 counts it. Result: the file was committed in `154b817` and the coverage gate fell to 15%.
 Fixed in `6d1c9cd` by listing it explicitly in `.gitignore` and `.coveragerc`.
 
-**Open follow-up:** that list is manual, so the next single-module dependency repeats
-the failure. The robust fix is for `start-dev.sh` to read each installed
-`*.dist-info/RECORD` after pip runs and write the top-level names into a generated,
-itself-ignored `backend/<svc>/.gitignore`; coverage needs a matching mechanism. Until
-then: after adding a dependency, run `git status` and the test gate before committing.
+**Automated (2026-09-23).** `bin/pip-ignore.sh <svc>` reads every `*.dist-info/RECORD`
+pip wrote into the service dir and generates `backend/<svc>/.gitignore` listing each
+top-level installed name (itself ignored by the root rule, never committed).
+`start-dev.sh` runs it after every install *and* on the skip path. Git reads it
+natively; coverage reads it through a configurer plugin in
+`tools/coverage-pip-omit/`, installed into `.venv` by `requirements-dev.txt` — it has to
+be an installed package because pytest-cov starts coverage before pytest adds `backend/`
+to the import path (a plugin under `backend/` failed with `ModuleNotFoundError`). The
+manual `typing_extensions.py` entries were removed. Proven both ways: without the
+generated file, git shows the module untracked and coverage drops to 15.45%; with it,
+nothing untracked and 100%.
 
 #### The second duplication axis, which is easy to miss
 
