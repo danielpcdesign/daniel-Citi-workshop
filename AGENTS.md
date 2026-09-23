@@ -37,6 +37,10 @@ clear role-based responsibilities and transparent communication.
 
 `Open` → `In Progress` → `Blocked` → `Resolved` → `Closed`
 
+> **Deliberate deviation (AD-17):** we add an `Unassigned` status before `Open`, making six.
+> The mandated five are unchanged and in the same order; `Unassigned` makes the admin's
+> triage queue and time-to-assign directly visible in the status history.
+
 Legal transitions, who may perform each, and whether `Blocked` requires a reason are design
 decisions — see AD-17.
 
@@ -67,7 +71,8 @@ dashboard queries from them:
 **Schema implication:** the timing questions ("how quickly … acknowledged, assigned,
 resolved") cannot be answered from a single mutable `status` column. Persist a status
 transition history with timestamps and actor from the start — retrofitting it later means
-losing every incident's history.
+losing every incident's history. With the `Unassigned` status (AD-17), first assignment
+*is* a transition (`Unassigned → Open`), so time-to-assign comes from the same history.
 
 ## Decided
 
@@ -86,6 +91,7 @@ losing every incident's history.
 | AD-08a | Token storage | **Refresh token in an httpOnly cookie** (`Secure; SameSite=Strict; Path=/api/auth/refresh`), same-origin via CloudFront. **Access token in memory only.** Single-flight refresh. |
 | AD-08b | Origin sealing | **Function URLs move to `authorization_type = "AWS_IAM"` behind a CloudFront OAC** (`origin_type = "lambda"`), so only the distribution can invoke them. |
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
+| AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
 | — | Auth sequencing | **Authentication and authorization are built before the CRUD they protect**, not retrofitted afterwards. Milestones M3–M4 in `README.md`. |
 | — | Backend language | Python (mandated by the requirements + recommended by the guides) |
@@ -351,7 +357,7 @@ Domain-specific, from the facility-incident problem statement:
 
 | ID | Decision | Status |
 | --- | --- | --- |
-| AD-17 | Incident state machine and transition authority | OPEN |
+| AD-17 | Incident state machine and transition authority | **DECIDED — admin any, engineer forward + unblock, employee none** |
 | AD-18 | Visual workflow representation | **DECIDED — stepper + status board** |
 | AD-19 | Dashboard and reporting strategy | OPEN |
 | AD-20 | Priority and escalation model | OPEN |
@@ -998,17 +1004,91 @@ CloudWatch retention is 7 days and the example uses plain `logging` with no stru
   confirm their own) · whether `Blocked` requires a mandatory reason (the problem statement
   asks "which incidents are escalated or blocked, **and why**" — so yes) · whether an
   unassigned incident can leave `Open`.
-- **Where enforced:** a single transition table in shared code, rejecting illegal moves with
-  400 — not scattered `if status ==` checks across handlers.
+- **Where enforced:** a single transition table, rejecting illegal moves — not scattered
+  `if status ==` checks across handlers. *(Location corrected under the decision below:
+  the `incidents` service, not shared code.)*
 - **Recommendation:** explicit transition map plus an append-only
   `incident_status_history(incident_id, from, to, actor_id, reason, created_at)` table. That
   one table answers the acknowledge/assign/resolve timing questions and the blocked-reason
   question at once.
-- **Depends on:** AD-09 (the same decorator should carry transition authority).
+- **Depends on:** AD-09 (the shared authorization mechanism; the transition policy itself
+  stays in `incidents`).
 - **Settled beneath this decision** (AD-01 → Ticket notes): `Blocked` requires a reason,
   stored on the status-history row (the record) **and** posted as a note (the
-  notification); notes are writable on every status except `Closed`. The rest of the
-  decision stays `OPEN`.
+  notification); notes are writable on every status except `Closed`.
+
+#### DECIDED — transition authority by persona
+
+**Workflow** — engineer moves shown; only an admin assigns, and assigning performs
+`Unassigned → Open` automatically:
+
+```
+Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
+                                             ⇅
+                                          Blocked
+```
+
+| From → To | Employee | Engineer (assigned) | Facility Admin |
+| --- | --- | --- | --- |
+| `Unassigned` → `Open` (by assigning) | ✗ | ✗ | ✓ (only via assignment) |
+| `Open` → `In Progress` | ✗ | ✓ | ✓ |
+| `In Progress` → `Blocked` | ✗ | ✓ (reason required) | ✓ (reason required) |
+| `Blocked` → `In Progress` | ✗ | ✓ | ✓ |
+| `In Progress` → `Resolved` | ✗ | ✓ | ✓ |
+| `Resolved` → `Closed` | ✗ | ✗ | ✓ |
+| any other move, incl. reopening `Closed` | ✗ | ✗ | ✓ (entering `Blocked` still needs a reason) |
+| same status → same status | ✗ | ✗ | ✗ (`400`) |
+
+- **Admin: any status to any other.** The escape hatch for corrections and reopening. Every
+  admin move still writes a history row, so overrides are visible, not silent.
+- **Engineer: one step forward at a time, plus unblocking.** No skipping `In Progress` —
+  its timestamp is the "how quickly acknowledged" metric, and a skip leaves it empty.
+  `Blocked → In Progress` is allowed because `Blocked` is a detour, not a stage (AD-18);
+  without it every unblock would route through an admin. No `Blocked → Resolved`: the
+  ticket returns to `In Progress` first.
+- **Only admins close.** There is no "under review" state, so `Resolved` means "the
+  engineer says it is fixed" and `Closed` means "an admin confirms it is done". An
+  engineer cannot reopen their own `Resolved` ticket; that is an admin move.
+- **Employee: no status changes.** Employees take part through notes only.
+- **Ownership:** an engineer may transition only incidents assigned to them.
+- **Every transition** writes one `incident_status_history` row (from, to, actor, reason,
+  timestamp) in the same transaction as the status update (AD-04).
+- **Enforcement — recommended, pending AD-09:** the transition table lives **in the
+  `incidents` service** (e.g. `backend/incidents/workflow.py`), not in `_shared/`. AD-01
+  makes `incidents` its only consumer, and `_shared/` is for code more than one service
+  needs — vendoring single-service business rules into every bundle would misstate the
+  dependency. Split: `_shared/` holds the *mechanism* (token verification, role from
+  claims, the `403` envelope); each service holds its *policy* (which role may make which
+  move, what "owns this ticket" means). `workflow.py` is pure — no HTTP, no DB — and is the
+  primary unit-test target. Same-status → `400`; outside the caller's permissions → `403`.
+  The frontend learns which moves to offer from the API (allowed transitions computed by
+  the same module), never from a copy of the table.
+- **DECIDED — frontend shows server-computed moves (2026-09-23).** The incident response
+  carries `allowed_transitions`: the target statuses *this caller* may move *this incident*
+  to, computed by `workflow.py` from role, ownership, and current status. The UI renders
+  exactly that list as actions and hides the rest. One copy of the rules; the UI can never
+  offer a move the server would refuse, and the server still re-checks every request.
+- **DECIDED — a sixth status, `Unassigned`, before `Open` (2026-09-23).** New incidents
+  start `Unassigned`. **Only admins assign**, and assigning moves the incident
+  `Unassigned → Open` automatically, writing a history row like any transition.
+- **Invariant: status is `Unassigned` if and only if there is no assignee.** Enforced in
+  `workflow.py` *and* by a database `CHECK` constraint, so no code path can produce an
+  assigned `Unassigned` incident or an unassigned `Open` one. Consequences: nothing leaves
+  `Unassigned` except by assignment (this narrows the admin's any-to-any rule); an admin
+  moving an incident back to `Unassigned` clears its assignee in the same transaction.
+- **Timing metrics, all from the status history:** created → *assigned*
+  (`Unassigned → Open`) → *acknowledged* (`Open → In Progress`) → *resolved*.
+- **This deviates from the problem statement's five-status workflow.** The five keep their
+  names and order; `Unassigned` is prepended. Documented in `README.md` as a deliberate
+  deviation: it makes the admin's triage queue a plain status filter and time-to-assign a
+  plain transition.
+- **Rejected:** unassigned as a condition on `Open` (works, but the queue and the
+  time-to-assign metric need a second mechanism beside the status history); assignment
+  auto-moving to `In Progress` (merges "assigned" and "acknowledged").
+- **Reassignment: admins only, not recorded (2026-09-23).** Reassigning changes the
+  assignee but not the status, so no history row is written. Current work distribution
+  is read from `incidents.assignee`; historical distribution ("who held this ticket
+  before") is a stated scope cut. An engineer cannot hand a ticket to someone else.
 
 ### AD-18 · Visual workflow representation
 
@@ -1026,7 +1106,8 @@ An explicit MVP capability, and the most under-specified one.
 
 #### DECIDED — stepper per incident, status board per dashboard
 
-- **Stepper** on the incident detail view, for every persona. It answers the requester's
+- **Stepper** on the incident detail view, for every persona, starting at `Unassigned`
+  (AD-17). It answers the requester's
   question — "where is my ticket?" — which is the service-desk half of the product.
 - **Status-grouped board** on the Admin/Engineer dashboard. It answers the dispatcher's
   question — "what is open, and what is stuck?" It is a triage view, not a planning board

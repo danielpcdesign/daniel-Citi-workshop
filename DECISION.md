@@ -24,7 +24,20 @@ in commit `af53415`; a date means it was settled in a working session on that da
 | AD-08a | Token storage | Refresh token in httpOnly `SameSite=Strict` cookie; access token in memory | Script cannot read the long-lived credential; no CSRF surface on API calls | pre-session |
 | AD-08b | Origin sealing | Function URLs `AWS_IAM` behind a CloudFront OAC | Only the distribution can invoke a Lambda; direct calls get 403 | pre-session |
 | AD-08c | Access-token transport | `X-Access-Token` header, not `Authorization` | OAC's SigV4 signature occupies `Authorization` | pre-session |
+| AD-17 | Incident state machine | Admin any→any; engineer (assigned only) `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`; employee none; only admins close | No skip keeps the acknowledged timestamp; unblock avoids admin bottleneck; no review state, so admin closing is the confirmation | 2026-09-23 |
 | AD-18 | Visual workflow | MUI `Stepper` per incident + status-grouped board on Admin/Engineer dashboard | Stepper answers the requester, board answers the dispatcher; drag only once AD-17 is enforced server-side | 2026-09-23 |
+
+### Incident workflow (AD-17)
+
+Engineer moves shown, on assigned tickets only. Only admins assign, which moves a ticket
+`Unassigned → Open`. Admins may otherwise move between any two statuses, but nothing leaves
+`Unassigned` without an assignee. Only admins close; employees change no status.
+
+```
+Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
+                                             ⇅
+                                          Blocked
+```
 
 ## Decided without an AD number
 
@@ -41,9 +54,9 @@ in commit `af53415`; a date means it was settled in a working session on that da
 | DB credentials | Read with `os.environ[...]`, no fallbacks; `sslmode=require` when not local | Terraform always injects them, so a missing one is a deploy bug, not a default | 2026-09-22 |
 | Service-dir gitignore | Allow-list: only `*.py`, `requirements.txt`, `tests/` tracked | pip installs into the service dir; package names cannot be enumerated | 2026-09-22 |
 
-## Settled beneath open decisions
+## Rules settled beneath a parent decision
 
-These are fixed, but the parent decision is still `OPEN`.
+Fixed rules recorded under a parent. AD-17 has since closed; AD-09 and M8 are still open.
 
 | Parent | Rule | Why | Recorded |
 |---|---|---|---|
@@ -51,10 +64,13 @@ These are fixed, but the parent decision is still `OPEN`.
 | M8 | One chronological conversation per incident, no reply nesting | The personas describe a two-way conversation, not a forum | 2026-09-23 |
 | AD-09 | Notes are soft-deleted, never hard-deleted | Keeps the record behind "how effectively are employees informed" | 2026-09-23 |
 | AD-17 | `Blocked` reason stored on the status-history row **and** posted as a note | History is the undeletable record the report reads; the note tells the requester | 2026-09-23 |
+| AD-17 | Incident responses include `allowed_transitions`, computed server-side by the `incidents` workflow module; the UI shows only those | The rules exist once; the UI cannot offer a move the server would refuse | 2026-09-23 |
+| AD-17 | Added `Unassigned` status before `Open`; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee (code + DB `CHECK`) | Triage queue is a status filter; time-to-assign is an ordinary transition. Deliberate deviation from the brief's five statuses | 2026-09-23 |
+| AD-17 | Only admins reassign; reassignment is not recorded | Current distribution comes from the incident's assignee; history of who held a ticket is a stated scope cut | 2026-09-23 |
 | AD-09 | Only the author edits a note; author or Facility Admin soft-deletes | Admins moderate but never rewrite someone else's words | 2026-09-23 |
 
 ## Still open
 
 AD-05 · AD-06 · AD-09 · AD-10 · AD-11 · AD-12 · AD-13 · AD-14 · AD-15 ·
-AD-16 · AD-17 · AD-19 · AD-20 · AD-21 · AD-22 — see `AGENTS.md` → Pending architecture
+AD-16 · AD-19 · AD-20 · AD-21 · AD-22 — see `AGENTS.md` → Pending architecture
 decisions.

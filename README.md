@@ -208,7 +208,7 @@ On the frontend, every URL the application can call lives in `src/services/`. Th
 
 Most decisions here can be revisited. One cannot.
 
-Three of the seven questions the application must answer are about *time*: how quickly incidents are acknowledged, assigned, and resolved. **None of them can be answered from a mutable `status` column**, which knows only where a ticket is now. They need an append-only record of every transition — from, to, who, when, and why — written from the first incident onward.
+Three of the seven questions the application must answer are about *time*: how quickly incidents are acknowledged, assigned, and resolved. **None of them can be answered from a mutable `status` column**, which knows only where a ticket is now. They need an append-only record of every transition — from, to, who, when, and why — written from the first incident onward. Because incidents start in an added `Unassigned` status (AD-17), first assignment is itself a transition, so time-to-assign comes from the same record.
 
 Adding that table in week two does not backfill it. Every incident created before it exists has no history and never will, and the dashboards in M10 would be computed over a partial record while appearing complete. That is why M2 leads the milestone order and why the history table is named explicitly in its scope rather than left to emerge.
 
@@ -224,11 +224,23 @@ Open architecture decisions live in **`AGENTS.md` → Pending architecture decis
 | AD-01 | Service decomposition | **Split by domain:** `auth`, `incidents`, `facilities`, `engineers`, and `reports` from M10. Ticket notes are their own entity but are deployed in `incidents` at `/api/incidents/{id}/notes`, because every notes permission check is the parent incident's check. All services share one database. |
 | AD-03 | Schema and migrations | **A private `_migrate` Lambda with no Function URL, run by Terraform during `apply`**, applying numbered forward-only SQL files tracked with checksums. Cloud Aurora is not publicly reachable, so only something inside the VPC can apply the schema — and keeping it out of service discovery means nothing on the internet can trigger it. |
 | AD-04 | Database access | **Raw `psycopg` 3, the example's pattern:** one module-scope connection per warm Lambda container, reopened on error. No pool (a container serves one request at a time) and no ORM. All queries parameterized; any write touching more than one row runs in one transaction. |
+| AD-17 | Incident workflow | **Admin: any status to any other. Engineer (assigned tickets only): one step forward, plus unblocking. Employee: none.** Only admins close. New incidents start `Unassigned`; only admins assign, which moves them to `Open`. See diagram below. |
 | AD-18 | Visual workflow | **MUI `Stepper` on each incident** (the requester's "where is my ticket?") **plus a status-grouped board** on the Admin/Engineer dashboard (the dispatcher's "what is stuck?"). Drag-to-transition only after the workflow is enforced server-side. |
 
 The rest are open. The rule is that an open decision gets settled deliberately and recorded, not resolved silently in a commit — the register is the artifact that makes trade-offs explainable afterwards, which is half of what the workshop grades.
 
 *(This table is to be extended as decisions close.)*
+
+**Incident workflow** (AD-17). Engineer moves shown. Only admins assign, which moves a ticket `Unassigned → Open`; admins may otherwise move a ticket between any two statuses, except that nothing leaves `Unassigned` without an assignee; only admins close; employees change no status.
+
+```
+Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
+                                             ⇅
+                                          Blocked
+```
+
+**Deliberate deviation from the problem statement.** The brief's workflow is `Open → In Progress → Blocked → Resolved → Closed`. We prepend a sixth status, `Unassigned`, and keep the five unchanged. Reason: the admin's triage queue becomes a plain status filter, and time-to-assign — one of the questions the app must answer — becomes an ordinary transition in the status history instead of needing a second tracking mechanism.
+
 
 ## Known defects in the provided scaffold
 
