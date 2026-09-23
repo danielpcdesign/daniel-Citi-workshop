@@ -16,6 +16,7 @@ in commit `af53415`; a date means it was settled in a working session on that da
 | AD-02 | Shared-code packaging | Vendor `backend/_shared/` into each service at prebuild; copies gitignored | Only physical files satisfy both the cloud zip and LocalStack's hot-reload mount | pre-session |
 | AD-03 | Schema ownership and migrations | Private `backend/_migrate/` Lambda (no Function URL) invoked by Terraform during `apply`; numbered forward-only SQL + checksums | Aurora is VPC-only, so migrations must run inside it; `_` prefix keeps it off the internet; numbered files can alter tables without data loss | 2026-09-23 |
 | AD-04 | DB access layer | Raw `psycopg` 3; one module-scope connection per warm container, reopened on error; parameterized queries only; multi-row writes in one transaction | Matches the example; a Lambda container serves one request at a time, so a pool or ORM adds nothing | 2026-09-23 |
+| AD-05 | Intra-Lambda routing | Hand-rolled router in `_shared/`: method + pattern table, `404`/`405`+`Allow`, optional `/api/<service>` prefix and `//` normalised | No dependency or cold-start cost; fully explainable and unit-testable; Powertools' extras belong to AD-12/AD-16 | 2026-09-23 |
 | AD-07 | Auth mechanism | Self-issued JWT, verified in every handler, with expiry | No new infra (not Cognito/OAuth); a required deliverable, done for real | pre-session |
 | AD-07a | Signing algorithm | RS256 | Only `auth` can mint tokens; other services verify with a public key | pre-session |
 | AD-07b | Signing key storage | Secrets Manager (cloud); env var dev key when `IS_LOCAL` | IAM grant already exists; only `auth` needs the secret | pre-session |
@@ -85,6 +86,6 @@ Fixed rules recorded under a parent. AD-17 has since closed; AD-09, AD-12, and M
 
 ## Still open
 
-AD-05 · AD-06 · AD-09 · AD-10 · AD-11 · AD-12 · AD-13 · AD-14 · AD-15 ·
+AD-06 · AD-09 · AD-10 · AD-11 · AD-12 · AD-13 · AD-14 · AD-15 ·
 AD-16 · AD-19 — see `AGENTS.md` → Pending architecture
 decisions.

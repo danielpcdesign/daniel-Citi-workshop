@@ -83,6 +83,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-02 | Shared-code packaging | **Vendor `backend/_shared/` into each service directory as a prebuild step**, gitignoring the copies. Physical presence is the only thing that satisfies both the zip builder and the LocalStack hot-reload mount. Not a Lambda layer, not a second `source_path` entry. |
 | AD-03 | Schema ownership and migrations | **A private `backend/_migrate/` Lambda, declared in its own `infra/migrate.tf` with no Function URL, invoked by Terraform (`aws_lambda_invocation`) during `apply`.** Format: numbered forward-only SQL files with checksums in a `schema_migrations` table. |
 | AD-04 | DB access layer | **Raw `psycopg` 3, as in the example: one module-scope connection per warm Lambda container, opened lazily, dropped and reopened on error.** No pool, no SQLAlchemy. Lives in `_shared/` (AD-02). Multi-row writes in `with conn.transaction():`. |
+| AD-05 | Intra-Lambda routing | **Hand-rolled router in `_shared/`:** method + path-pattern table, `404` unknown path, `405` + `Allow` wrong method, optional `/api/<service>` prefix and duplicate slashes normalised. No framework. |
 | AD-07 | Auth mechanism | **Self-issued JWT, implemented for real** — signed token, carried in `X-Access-Token` (AD-08c), verified in every handler, with expiry. Not OAuth, not Cognito. A sign-in that returns a user without issuing a token does not satisfy this. |
 | AD-07a | Signing algorithm | **RS256.** Only the `auth` service holds the private key; all other services verify with the public key, distributed as a plain env var. |
 | AD-07b | Signing key storage | **AWS Secrets Manager**, private key only, read by the `auth` service alone and cached at module scope. Local dev reads a dev key from an env var. |
@@ -345,7 +346,7 @@ but **none is settled until confirmed** — record the outcome here and in the R
 | AD-02 | Shared-code packaging | **DECIDED — vendor `_shared/` into each service** |
 | AD-03 | Schema ownership and migrations | **DECIDED — private migrate Lambda, numbered SQL** |
 | AD-04 | DB access layer and connection reuse | **DECIDED — raw psycopg 3, module-scope connection** |
-| AD-05 | Intra-Lambda routing | OPEN |
+| AD-05 | Intra-Lambda routing | **DECIDED — hand-rolled router in `_shared/`** |
 | AD-06 | URL/base-path convention and frontend API client | OPEN |
 | AD-07 | Auth mechanism and placement | **DECIDED — RS256 JWT + rotating refresh tokens** |
 | AD-08 | Browser token storage, origin sealing, token transport | **DECIDED** |
@@ -721,6 +722,38 @@ Function URLs hand the whole path and method to one handler; there are no gatewa
 - **Recommendation:** AWS Lambda Powertools for Python — routing, request validation, and
   structured logging in one dependency, which also answers part of AD-12 and AD-16.
   Hand-rolled is defensible if bundle size or cold start matters more.
+  *(Superseded below.)*
+
+#### DECIDED — hand-rolled router in `_shared/` (2026-09-23)
+
+- **A small router of our own**, vendored per AD-02: a route table of
+  `(method, pattern like /incidents/{id}/notes) → handler`, path parameters extracted by
+  the pattern, pure function `route(method, path) → (handler, params)` testable without an
+  event or AWS.
+- **Contract:** unknown path → `404`; known path, wrong method → `405` with an `Allow`
+  header; an optional leading `/api/<service>` prefix and duplicate slashes are normalised
+  before matching, so the same table works behind CloudFront (full path) and behind the
+  local dev proxy (prefix stripped). Unknown routes fall through to `404`, never to a
+  partial match.
+- **Why not Powertools:** no library the task does not need (CLAUDE.md §2), nothing to
+  learn and defend beyond ~50 lines, zero cold-start or bundle cost at 128 MB. Its extra
+  value — validation and structured logging — belongs to AD-12 and AD-16, still open; if
+  those favour it later, swapping the router is a contained change.
+- **Rejected:** FastAPI + Mangum (a full web framework per Lambda, heaviest cold start);
+  Flask + adapter (thinly maintained adapters).
+- **We own the edge cases:** trailing slashes, URL-decoding of path segments, base64
+  request bodies (`isBase64Encoded`). Each gets a unit test.
+- **Path shape, confirmed locally (2026-09-23)** with a temporary `rawPath` log in `auth`:
+  through the dev proxy the Lambda receives the path **without** `/api/<service>`
+  (`/api/auth/refresh` → `/refresh`; `/api/auth` and `/api/auth/` → `/`); called directly,
+  as CloudFront does, it receives the **full** path (`/api/auth/refresh`). The query string
+  arrives separately in `rawQueryString`. The predicted `//` from the proxy's URL join does
+  not reach the handler — LocalStack collapses it — but the router normalises repeated
+  slashes anyway rather than depend on that.
+- **Decoding:** LocalStack delivers `rawPath` already percent-decoded (`/a%20b` → `/a b`).
+  Whether AWS does is **unverified — check on the first cloud deploy.** The router matches
+  on segments first and decodes only captured parameters, once, so a literal `%` is never
+  double-decoded.
 
 ### AD-06 · URL/base-path convention and frontend API client
 
