@@ -26,6 +26,7 @@ in commit `af53415`; a date means it was settled in a working session on that da
 | AD-08c | Access-token transport | `X-Access-Token` header, not `Authorization` | OAC's SigV4 signature occupies `Authorization` | pre-session |
 | AD-17 | Incident state machine | Admin any→any; engineer (assigned only) `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`; employee none; only admins close | No skip keeps the acknowledged timestamp; unblock avoids admin bottleneck; no review state, so admin closing is the confirmation | 2026-09-23 |
 | AD-18 | Visual workflow | MUI `Stepper` per incident + status-grouped board on Admin/Engineer dashboard | Stepper answers the requester, board answers the dispatcher; drag only once AD-17 is enforced server-side | 2026-09-23 |
+| AD-22 | Facility hierarchy | Three tables; incident `building_id` required, `floor_id`/`seat_id` optional; composite FKs; `archived_at` soft delete; no occupants | Hotspot report is a plain `GROUP BY`; the DB rejects inconsistent locations; archiving keeps history | 2026-09-23 |
 
 ### Incident workflow (AD-17)
 
@@ -73,5 +74,5 @@ Fixed rules recorded under a parent. AD-17 has since closed; AD-09 and M8 are st
 ## Still open
 
 AD-05 · AD-06 · AD-09 · AD-10 · AD-11 · AD-12 · AD-13 · AD-14 · AD-15 ·
-AD-16 · AD-19 · AD-20 · AD-21 · AD-22 — see `AGENTS.md` → Pending architecture
+AD-16 · AD-19 · AD-20 · AD-21 — see `AGENTS.md` → Pending architecture
 decisions.

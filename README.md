@@ -226,6 +226,7 @@ Open architecture decisions live in **`AGENTS.md` → Pending architecture decis
 | AD-04 | Database access | **Raw `psycopg` 3, the example's pattern:** one module-scope connection per warm Lambda container, reopened on error. No pool (a container serves one request at a time) and no ORM. All queries parameterized; any write touching more than one row runs in one transaction. |
 | AD-17 | Incident workflow | **Admin: any status to any other. Engineer (assigned tickets only): one step forward, plus unblocking. Employee: none.** Only admins close. New incidents start `Unassigned`; only admins assign, which moves them to `Open`. Reassignment goes back through `Unassigned` with a required reason, so every hand-off is in the history. See diagram below. |
 | AD-18 | Visual workflow | **MUI `Stepper` on each incident** (the requester's "where is my ticket?") **plus a status-grouped board** on the Admin/Engineer dashboard (the dispatcher's "what is stuck?"). Drag-to-transition only after the workflow is enforced server-side. |
+| AD-22 | Facility hierarchy | **Three tables — buildings, floors, seats.** An incident names its building and optionally a floor and seat; composite foreign keys make the database reject a seat on the wrong floor. Locations are archived, never deleted, so hotspot history survives. Seat occupants are out of scope. |
 
 The rest are open. The rule is that an open decision gets settled deliberately and recorded, not resolved silently in a commit — the register is the artifact that makes trade-offs explainable afterwards, which is half of what the workshop grades.
 
@@ -289,6 +290,7 @@ Recorded so the gaps are on the record rather than implied by silence. Each is a
 - **True real-time updates.** The expected-capabilities list asks for them; `infra/` contains no WebSocket API, so delivering them means writing new infrastructure rather than using the scaffold. The plan is optimistic UI with short polling on the views where staleness is visible, stated as the trade rather than presented as real-time.
 - **Email verification at registration.** There is no email infrastructure in `infra/` — SES would be new infra. Domain validation is enforced server-side; deliverability is not verified. A fake verification step would *look* like a control while being none.
 - **Integrations with external systems.** Explicitly out of scope per the assignment.
+- **Seat occupants.** Seats are places an incident happens, not places people are assigned to — the brief never maps people to seats, and users carry no `seat_id`. Modelling occupancy would add a second meaning to every seat for no question the app must answer (AD-22).
 
 ## Roadmap
 

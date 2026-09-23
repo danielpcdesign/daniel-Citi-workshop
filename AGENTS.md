@@ -93,6 +93,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
+| AD-22 | Facility hierarchy | **Three tables** (`buildings`, `floors`, `seats`); incident has required `building_id`, optional `floor_id`, optional `seat_id` (needs a floor), kept consistent by composite FKs. Soft delete via `archived_at`. No seat occupants. |
 | — | Auth sequencing | **Authentication and authorization are built before the CRUD they protect**, not retrofitted afterwards. Milestones M3–M4 in `README.md`. |
 | — | Backend language | Python (mandated by the requirements + recommended by the guides) |
 | — | Frontend | React + Material UI + React Responsive (mandated) |
@@ -362,7 +363,7 @@ Domain-specific, from the facility-incident problem statement:
 | AD-19 | Dashboard and reporting strategy | OPEN |
 | AD-20 | Priority and escalation model | OPEN |
 | AD-21 | Registration, `acme.inc` email restriction, and persona assignment | OPEN |
-| AD-22 | Facility hierarchy modelling | OPEN |
+| AD-22 | Facility hierarchy modelling | **DECIDED — three tables, composite FKs, soft delete** |
 
 ### AD-01 · Service decomposition
 
@@ -1191,6 +1192,33 @@ report.
   `seat_id` plus a required `floor_id`/`building_id` so non-seat incidents are still
   locatable and the rollup report stays a simple join. Soft-delete facilities — hard
   deletion destroys incident history the reports depend on.
+
+#### DECIDED — three tables, composite FKs, soft delete, no occupants (2026-09-23)
+
+- **Three tables:** `buildings`, `floors(building_id → buildings)`,
+  `seats(floor_id → floors)`. The spec names exactly three levels; a self-referential
+  `locations` table would need recursive CTEs for rollups and cannot enforce "a seat's
+  parent is a floor" by FK.
+- **Incident location:** `building_id` required, `floor_id` nullable, `seat_id` nullable
+  and only allowed when `floor_id` is set (`CHECK (seat_id IS NULL OR floor_id IS NOT NULL)`).
+  A lobby leak has no seat; a broken elevator has no floor. *(Supersedes the earlier
+  recommendation's required `floor_id`.)* The hotspot report is a plain `GROUP BY` at each
+  level on `incidents`, no joins.
+- **Composite foreign keys keep the three columns consistent.** `floors` gets
+  `UNIQUE (building_id, id)` and `seats` gets `UNIQUE (floor_id, id)`; `incidents` references
+  `(building_id, floor_id) → floors (building_id, id)` and
+  `(floor_id, seat_id) → seats (floor_id, id)`. The database itself rejects a seat on the
+  wrong floor or a floor in the wrong building. PostgreSQL's default `MATCH SIMPLE` skips
+  the check when any column is null, which is exactly the "building only" / "no seat" case.
+- **Soft delete:** `archived_at` on all three tables. Archived locations cannot be chosen
+  for new incidents; existing incidents keep pointing at them, so hotspot history stays
+  whole. Archiving a building archives its floors and seats in one transaction (AD-04).
+  Hard delete is blocked by the FKs (`ON DELETE RESTRICT`).
+- **Names unique within their parent:** floor name per building, seat label per floor.
+- **No seat occupants.** The spec never maps people to seats; users carry no `seat_id`.
+  Stated scope cut.
+- **Ownership:** the `facilities` service (AD-01). Facility Admin writes; every
+  authenticated persona reads, since employees pick a location when reporting.
 
 ---
 
