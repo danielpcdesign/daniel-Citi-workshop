@@ -14,6 +14,8 @@ MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 FILE_PATTERN = re.compile(r"^\d{3}_[a-z0-9_]+\.sql$")
 # arbitrary constant; any two concurrent runs contend for the same lock
 LOCK_KEY = 22_031_001
+# $2a$/$2b$/$2y$, two-digit cost, 53 chars of salt+hash
+BCRYPT_PATTERN = re.compile(r"^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$")
 
 
 def _migration_files() -> list[Path]:
@@ -39,7 +41,39 @@ def _applied(conn: Connection) -> dict[str, str]:
     return dict(rows)
 
 
-def run() -> list[str]:
+def _seed_admin(conn: Connection, bootstrap: dict) -> str:
+    email = (bootstrap.get("email") or "").strip().lower()
+    full_name = (bootstrap.get("full_name") or "").strip()
+    password_hash = bootstrap.get("password_hash") or ""
+
+    with conn.transaction():
+        if conn.execute("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1").fetchone():
+            return "exists"
+
+        # no admin means nobody can ever promote anyone: fail the deploy rather than ship that
+        if not email or not password_hash:
+            raise RuntimeError(
+                "no admin exists and TF_VAR_bootstrap_admin_email / "
+                "TF_VAR_bootstrap_admin_password_hash are not set"
+            )
+        # a plaintext password here would be stored as-is, so refuse anything that is not a bcrypt hash
+        if not BCRYPT_PATTERN.match(password_hash):
+            raise ValueError("bootstrap_admin_password_hash is not a bcrypt hash")
+
+        existing = conn.execute("SELECT role FROM users WHERE email = %s", (email,)).fetchone()
+        # silently promoting an existing account would hand admin to whoever registered that email
+        if existing:
+            raise RuntimeError(f"{email} is already registered as {existing[0]}; choose another email")
+
+        conn.execute(
+            "INSERT INTO users (email, password_hash, full_name, role) VALUES (%s, %s, %s, 'admin')",
+            (email, password_hash, full_name),
+        )
+    logger.info("seeded first admin %s", email)
+    return "seeded"
+
+
+def run(bootstrap: dict) -> dict:
     files = _migration_files()
     newly_applied = []
 
@@ -68,10 +102,13 @@ def run() -> list[str]:
                     )
                 logger.info("applied %s", path.name)
                 newly_applied.append(version)
+
+            # after migrations, still under the lock: needs the users table, and two runs must not both seed
+            admin = _seed_admin(conn, bootstrap)
         finally:
             conn.execute("SELECT pg_advisory_unlock(%s)", (LOCK_KEY,))
 
-    return newly_applied
+    return {"applied": newly_applied, "admin": admin}
 
 
 def handler(event=None, context=None):
@@ -79,7 +116,8 @@ def handler(event=None, context=None):
     if isinstance(event, dict) and "requestContext" in event:
         return {"statusCode": 404, "body": ""}
 
+    bootstrap = (event or {}).get("bootstrap_admin") or {}
     # exceptions propagate on purpose: a lambda error is what fails terraform apply
-    applied = run()
-    logger.info("migrations done; newly applied: %s", applied)
-    return {"applied": applied}
+    result = run(bootstrap)
+    logger.info("migrations done; newly applied: %s; admin: %s", result["applied"], result["admin"])
+    return result

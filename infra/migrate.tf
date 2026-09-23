@@ -62,7 +62,16 @@ module "migrate" {
 
 resource "aws_lambda_invocation" "migrate" {
   function_name = module.migrate.lambda_function_name
-  input         = jsonencode({ action = "migrate" })
+  # seeding values travel in the invocation input, not the function's env vars, so they are not
+  # left visible in the lambda configuration
+  input = jsonencode({
+    action = "migrate"
+    bootstrap_admin = {
+      email         = var.bootstrap_admin_email
+      full_name     = var.bootstrap_admin_name
+      password_hash = var.bootstrap_admin_password_hash
+    }
+  })
 
   # re-run whenever a migration file or the runner changes
   triggers = {

@@ -83,3 +83,24 @@ variable "aws_eks_type" {
     error_message = "The aws_eks_type variable must be either 'ON_DEMAND' or 'SPOT'."
   }
 }
+
+# first facility admin (AD-21), seeded by the _migrate lambda only while no admin exists.
+# a bcrypt hash, never the password: terraform state stores variable values in plain text.
+variable "bootstrap_admin_email" {
+  description = "Email of the first Facility Admin (must be @acme.inc). Empty skips seeding."
+  type        = string
+  default     = ""
+}
+
+variable "bootstrap_admin_name" {
+  description = "Display name of the first Facility Admin."
+  type        = string
+  default     = "Facility Admin"
+}
+
+variable "bootstrap_admin_password_hash" {
+  description = "bcrypt hash of the first Facility Admin's password. Empty skips seeding."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
