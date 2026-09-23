@@ -36,12 +36,31 @@ DEV_DB = {
 
 
 def _load_service(name: str) -> ModuleType:
+    service_dir = BACKEND / name
+    # a lambda imports its helper modules (passwords, tokens) as top-level names from its own dir;
+    # drop helpers another service loaded, so services never see each other's modules. _shared is
+    # exempt: `shared` must keep pointing at the source package, never a stale vendored copy
+    for mod_name, mod in list(sys.modules.items()):
+        mod_dir = Path(getattr(mod, "__file__", None) or "/").parent
+        if mod_dir.parent == BACKEND and mod_dir.name != "_shared" and mod_dir != service_dir:
+            del sys.modules[mod_name]
+    # only this service's dir on the path, or `import shared` could find another's vendored copy
+    sys.path[:] = [p for p in sys.path if Path(p).parent != BACKEND]
+    sys.path.insert(0, str(service_dir))
     # every lambda's entry file is function.py, so each is loaded under a unique module name
-    path = BACKEND / name / "function.py"
-    spec = importlib.util.spec_from_file_location(f"{name.strip('_')}_function", path)
+    spec = importlib.util.spec_from_file_location(f"{name.strip('_')}_function", service_dir / "function.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture
+def migrated_schema(isolated_schema):
+    # the real schema, applied into the throwaway schema, for services that need tables
+    with psycopg.connect(_shared.db.conn_str(), autocommit=True) as conn:
+        for path in sorted((BACKEND / "_migrate" / "migrations").glob("*.sql")):
+            conn.execute(path.read_text())
+    return isolated_schema
 
 
 @pytest.fixture

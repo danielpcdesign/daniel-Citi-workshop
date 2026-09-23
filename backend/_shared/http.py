@@ -28,6 +28,7 @@ class Request:
     body: object
     user: authz.User | None
     headers: dict[str, str]
+    cookies: dict[str, str]
 
 
 # the single entry point every lambda's handler calls (AD-12): route, authorise, parse, run, envelope, log
@@ -61,10 +62,14 @@ def dispatch(router: Router, event: dict | None, context: object) -> dict:
             body=_body(event),
             user=user,
             headers=headers,
+            cookies=_cookies(event, headers),
         )
-        status, body = route.handler(request)
+        # a handler returns (status, body) or (status, body, set_cookies)
+        status, body, *rest = route.handler(request)
+        set_cookies = rest[0] if rest else []
     except Exception as exc:
         status, body, extra_headers = _error(exc, req_id)
+        set_cookies = []
 
     response = {
         "statusCode": status,
@@ -75,6 +80,11 @@ def dispatch(router: Router, event: dict | None, context: object) -> dict:
         },
         "body": "" if body is None else json.dumps(body, default=str),
     }
+    if set_cookies:
+        # aws function urls set cookies from the `cookies` field; localstack ignores it and only honours a
+        # Set-Cookie header (probed 2026-09-23). we set one cookie at most, so send it both ways.
+        response["cookies"] = set_cookies
+        response["headers"]["Set-Cookie"] = set_cookies[0]
     # one access line per request (AD-16): the route pattern, not the path, so requests group by endpoint
     logger.info("request", extra={"fields": {
         "method": method,
@@ -95,6 +105,17 @@ def _correlation_id(value: str | None, fallback: str) -> str:
     except ValueError:
         logger.warning("malformed correlation id ignored")
         return fallback
+
+
+def _cookies(event: dict, headers: dict[str, str]) -> dict[str, str]:
+    # aws delivers cookies as a list in event["cookies"]; localstack leaves them in the cookie header
+    pairs = event.get("cookies") or (headers.get("cookie") or "").split(";")
+    cookies = {}
+    for pair in pairs:
+        name, sep, value = pair.strip().partition("=")
+        if sep and name:
+            cookies[name] = value
+    return cookies
 
 
 def _body(event: dict) -> object:

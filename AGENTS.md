@@ -937,6 +937,24 @@ verifying slightly differently from the rest, invisible until exploited), AD-03 
   Local deploy: only `auth` has `JWT_PRIVATE_KEY`, `_migrate` only the public key, no
   secret name locally; health 200 proves the crypto wheels load in the Lambda runtime.
   The generated pip ignore list grew 14 → 26 names with no manual step.
+- **Phase B built (2026-09-23): the endpoints.** `auth/passwords.py` (bcrypt cost 10, NIST
+  policy, dummy-hash timing equaliser), `auth/tokens.py` (RS256 access tokens; refresh tokens
+  as 256-bit random values stored as sha256; rotation with `SELECT … FOR UPDATE`; reuse
+  revokes the family; signing key cached per container, Secrets Manager in the cloud),
+  `auth/function.py` (register, login, refresh, `DELETE /refresh`, `/me`).
+  **Trap avoided and tested:** reuse detection ends in a `401`, and raising inside
+  `with conn.transaction()` rolls back — so the family revocation happens *after* the
+  transaction. A mutation moving it inside makes the legitimate holder's newer token keep
+  working (`200` where `401` is required); the test catches it.
+  **Cookies on Function URLs, probed on LocalStack (2026-09-23):** incoming cookies arrive
+  in `headers["cookie"]` with `event["cookies"]` null (AWS documents the list); the response
+  `cookies` field is silently ignored and only a `Set-Cookie` header works (AWS documents
+  the field). The wrapper reads both shapes and sets our single cookie both ways — verify
+  on the first cloud deploy that AWS does not mind the duplicate.
+  Verified: 24 auth tests (119 total, 100%); live through `:3001` with a cookie jar —
+  register 201 / duplicate 409 / wrong password 401 / login 200 with the locked-down cookie /
+  `/me` 200 and 401 / rotate 200 / reuse of the old token 401 and the current token then
+  401 (0 live tokens) / sign-out 204 with `Max-Age=0`, refresh afterwards 401.
 - **Security behaviour, not separate decisions:** login failure is always "invalid email
   or password", with a dummy bcrypt check for unknown emails so timing reveals nothing;
   token failures return `unauthenticated` with only "expired" or "invalid" as the message,
