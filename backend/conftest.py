@@ -9,14 +9,20 @@ import psycopg
 import pytest
 
 import _shared
+import _shared.authz
 import _shared.db
+import _shared.errors
+import _shared.http
+import _shared.log
+import _shared.router
 
 BACKEND = Path(__file__).parent
 
 # service code imports the vendored `shared` package; point that name at the _shared source instead,
 # so tests exercise the code coverage counts and do not depend on bin/sync-shared.sh having run
 sys.modules["shared"] = _shared
-sys.modules["shared.db"] = _shared.db
+for _name in ("authz", "db", "errors", "http", "log", "router"):
+    sys.modules[f"shared.{_name}"] = getattr(_shared, _name)
 
 # the local dev database, as terraform injects it into lambdas under localstack (infra/locals.tf)
 DEV_DB = {

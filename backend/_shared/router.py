@@ -1,38 +1,54 @@
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from urllib.parse import unquote
 
-Handler = Callable[..., dict]
+from .authz import ROLES
+from .errors import MethodNotAllowed, NotFound
+
+Handler = Callable[..., object]
 
 # a pattern segment like {incident_id}
 _PARAM = re.compile(r"^\{([a-z_][a-z0-9_]*)\}$")
 
 
-class NotFound(Exception):
-    pass
+@dataclass(frozen=True)
+class Route:
+    method: str
+    pattern: str
+    handler: Handler
+    roles: frozenset[str]
+    public: bool
 
 
-class MethodNotAllowed(Exception):
-    def __init__(self, allowed: list[str]):
-        super().__init__(f"allowed: {', '.join(allowed)}")
-        self.allowed = allowed
-
-
-# maps (method, path) to a handler for one service (AD-05)
+# maps (method, path) to a route for one service (AD-05)
 class Router:
     def __init__(self, service: str):
+        self.service = service
         # cloudfront delivers /api/<service>/...; the local dev proxy strips it
         self._prefix = f"/api/{service}"
-        self._routes: list[tuple[re.Pattern, dict[str, Handler]]] = []
-        self._patterns: dict[str, dict[str, Handler]] = {}
+        self._routes: list[tuple[re.Pattern, dict[str, Route]]] = []
+        self._patterns: dict[str, dict[str, Route]] = {}
 
-    def on(self, method: str, pattern: str) -> Callable[[Handler], Handler]:
+    def on(
+        self, method: str, pattern: str, *, roles: set[str] | None = None, public: bool = False
+    ) -> Callable[[Handler], Handler]:
         def register(handler: Handler) -> Handler:
-            self.add(method, pattern, handler)
+            self.add(method, pattern, handler, roles=roles, public=public)
             return handler
         return register
 
-    def add(self, method: str, pattern: str, handler: Handler) -> None:
+    def add(
+        self, method: str, pattern: str, handler: Handler,
+        *, roles: set[str] | None = None, public: bool = False,
+    ) -> None:
+        # closed by default (AD-09): a route that says nothing about access is a startup error
+        if public == bool(roles):
+            raise ValueError(f"{method} {pattern}: declare exactly one of roles=... or public=True")
+        unknown = set(roles or ()) - ROLES
+        if unknown:
+            raise ValueError(f"{method} {pattern}: unknown roles {sorted(unknown)}")
+
         pattern = self.normalize(pattern)
         methods = self._patterns.get(pattern)
         if methods is None:
@@ -43,7 +59,7 @@ class Router:
         # a second registration would silently shadow the first
         if method in methods:
             raise ValueError(f"duplicate route: {method} {pattern}")
-        methods[method] = handler
+        methods[method] = Route(method, pattern, handler, frozenset(roles or ()), public)
 
     def normalize(self, path: str) -> str:
         # collapse repeated slashes and drop a trailing one
@@ -53,19 +69,27 @@ class Router:
             path = path[len(self._prefix):] or "/"
         return path
 
-    def resolve(self, method: str, path: str) -> tuple[Handler, dict[str, str]]:
+    def resolve(self, method: str, path: str) -> tuple[Route, dict[str, str]]:
         path = self.normalize(path)
+        method = method.upper()
+        matches = []
         for regex, methods in self._routes:
             match = regex.fullmatch(path)
-            if match is None:
-                continue
-            handler = methods.get(method.upper())
-            if handler is None:
-                raise MethodNotAllowed(sorted(methods))
-            # decode each captured value once, after matching, so an encoded "/" cannot split a segment
-            params = {name: unquote(value) for name, value in match.groupdict().items()}
-            return handler, params
-        raise NotFound(path)
+            if match is not None:
+                matches.append((match, methods))
+        # most specific first: a literal segment beats a {param}, so /summary is never
+        # swallowed by /{incident_id} whatever order the routes were registered in
+        matches.sort(key=lambda pair: len(pair[0].groupdict()))
+        for match, methods in matches:
+            route = methods.get(method)
+            if route is not None:
+                # decode each captured value once, after matching, so an encoded "/" cannot split a segment
+                params = {name: unquote(value) for name, value in match.groupdict().items()}
+                return route, params
+        if matches:
+            # the path exists under some pattern, just not for this method
+            raise MethodNotAllowed(sorted({m for _, methods in matches for m in methods}))
+        raise NotFound("no such route")
 
     @staticmethod
     def _compile(pattern: str) -> re.Pattern:

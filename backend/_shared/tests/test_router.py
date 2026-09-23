@@ -1,6 +1,9 @@
 import pytest
 
-from _shared.router import MethodNotAllowed, NotFound, Router
+from _shared.errors import MethodNotAllowed, NotFound
+from _shared.router import Router
+
+ANY = {"employee", "engineer", "admin"}
 
 
 def list_incidents():
@@ -22,10 +25,10 @@ def list_notes():
 @pytest.fixture
 def router() -> Router:
     r = Router("incidents")
-    r.add("GET", "/", list_incidents)
-    r.add("POST", "/", create_incident)
-    r.add("GET", "/{incident_id}", get_incident)
-    r.add("GET", "/{incident_id}/notes", list_notes)
+    r.add("GET", "/", list_incidents, roles=ANY)
+    r.add("POST", "/", create_incident, roles={"employee"})
+    r.add("GET", "/{incident_id}", get_incident, roles=ANY)
+    r.add("GET", "/{incident_id}/notes", list_notes, roles=ANY)
     return r
 
 
@@ -36,24 +39,24 @@ def router() -> Router:
     "/api/incidents//42/notes/", # repeated and trailing slashes
 ])
 def test_cloud_and_local_paths_resolve_to_the_same_route(router, path):
-    handler, params = router.resolve("GET", path)
-    assert handler is list_notes
+    route, params = router.resolve("GET", path)
+    assert route.handler is list_notes
     assert params == {"incident_id": "42"}
 
 
 @pytest.mark.parametrize("path", ["/api/incidents", "/api/incidents/", "/", ""])
 def test_collection_root_forms(router, path):
-    handler, params = router.resolve("GET", path)
-    assert handler is list_incidents
+    route, params = router.resolve("GET", path)
+    assert route.handler is list_incidents
     assert params == {}
 
 
 def test_method_selects_the_handler(router):
-    assert router.resolve("POST", "/api/incidents")[0] is create_incident
+    assert router.resolve("POST", "/api/incidents")[0].handler is create_incident
 
 
 def test_method_is_case_insensitive(router):
-    assert router.resolve("get", "/7")[0] is get_incident
+    assert router.resolve("get", "/7")[0].handler is get_incident
 
 
 def test_prefix_is_stripped_only_on_a_segment_boundary(router):
@@ -87,22 +90,68 @@ def test_params_are_decoded_once(router):
 
 def test_encoded_slash_stays_inside_one_param(router):
     # decoding after matching means %2F cannot split the path into more segments
-    handler, params = router.resolve("GET", "/a%2Fb/notes")
-    assert handler is list_notes
+    route, params = router.resolve("GET", "/a%2Fb/notes")
+    assert route.handler is list_notes
     assert params == {"incident_id": "a/b"}
 
 
 def test_duplicate_registration_is_rejected(router):
     with pytest.raises(ValueError, match="duplicate route"):
-        router.add("GET", "/{incident_id}", get_incident)
+        router.add("GET", "/{incident_id}", get_incident, roles=ANY)
 
 
 def test_decorator_registers_and_returns_the_handler():
     r = Router("auth")
 
-    @r.on("post", "/refresh")
+    @r.on("post", "/refresh", public=True)
     def refresh():
         return {}
 
     assert refresh() == {}
-    assert r.resolve("POST", "/api/auth/refresh")[0] is refresh
+    route = r.resolve("POST", "/api/auth/refresh")[0]
+    assert route.handler is refresh
+    assert route.public and route.roles == frozenset()
+
+
+# AD-09: closed by default, so access must be declared, exactly once, with known roles
+@pytest.mark.parametrize("access", [{}, {"roles": set()}, {"roles": {"admin"}, "public": True}])
+def test_route_must_declare_access_exactly_once(access):
+    with pytest.raises(ValueError, match="declare exactly one"):
+        Router("x").add("GET", "/", list_incidents, **access)
+
+
+def test_unknown_role_is_rejected():
+    with pytest.raises(ValueError, match="unknown roles"):
+        Router("x").add("GET", "/", list_incidents, roles={"superuser"})
+
+
+def test_route_carries_its_roles(router):
+    route, _ = router.resolve("POST", "/")
+    assert route.roles == frozenset({"employee"})
+    assert not route.public
+
+
+def test_literal_segment_beats_a_param_regardless_of_registration_order():
+    r = Router("incidents")
+    r.add("GET", "/{incident_id}", get_incident, roles=ANY)
+    r.add("GET", "/summary", list_incidents, roles=ANY)
+    assert r.resolve("GET", "/summary")[0].handler is list_incidents
+    assert r.resolve("GET", "/42")[0].handler is get_incident
+
+
+def test_method_on_a_less_specific_pattern_still_matches():
+    # /summary only has GET, but /{incident_id} has DELETE: DELETE /summary goes to the param route
+    r = Router("incidents")
+    r.add("GET", "/summary", list_incidents, roles=ANY)
+    r.add("DELETE", "/{incident_id}", get_incident, roles={"admin"})
+    route, params = r.resolve("DELETE", "/summary")
+    assert (route.handler, params) == (get_incident, {"incident_id": "summary"})
+
+
+def test_405_lists_methods_from_every_matching_pattern():
+    r = Router("incidents")
+    r.add("GET", "/summary", list_incidents, roles=ANY)
+    r.add("DELETE", "/{incident_id}", get_incident, roles={"admin"})
+    with pytest.raises(MethodNotAllowed) as caught:
+        r.resolve("PUT", "/summary")
+    assert caught.value.allowed == ["DELETE", "GET"]

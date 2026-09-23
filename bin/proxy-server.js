@@ -107,7 +107,9 @@ const server = http.createServer((req, res) => {
       'host': target.host,
       // auth credentials: access token (AD-08c) and refresh cookie (AD-08a)
       ...(headers['x-access-token'] && { 'x-access-token': headers['x-access-token'] }),
-      ...(headers.cookie && { 'cookie': headers.cookie })
+      ...(headers.cookie && { 'cookie': headers.cookie }),
+      // one user action traced across calls (AD-16)
+      ...(headers['x-correlation-id'] && { 'x-correlation-id': headers['x-correlation-id'] })
     }
   };
 

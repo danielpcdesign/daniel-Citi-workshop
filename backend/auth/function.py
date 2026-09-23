@@ -1,51 +1,20 @@
-import json
-import logging
+from shared import log
+from shared.db import get_conn
+from shared.http import Request, dispatch
+from shared.router import Router
 
-from shared.db import get_conn, reset_conn
-
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-
-def _resp(status: int, body: dict) -> dict:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body),
-    }
+log.setup("auth")
+router = Router("auth")
 
 
-def _pg_version() -> str:
-    try:
-        with get_conn().cursor() as cur:
-            cur.execute("SELECT version();")
-            row = cur.fetchone()
-            return row[0] if row else "unknown"
-    except Exception:
-        reset_conn()
-        raise
+# public liveness check; reports reachability only, never versions or hostnames (fingerprinting)
+@router.on("GET", "/", public=True)
+def health(request: Request) -> tuple[int, dict]:
+    with get_conn().cursor() as cur:
+        cur.execute("SELECT 1")
+        cur.fetchone()
+    return 200, {"service": "auth", "database": "ok"}
 
 
 def handler(event=None, context=None):
-    event = event or {}
-    # names only, never values: x-access-token and cookie carry credentials
-    header_names = sorted((event.get("headers") or {}).keys())
-    logger.info("headers received: %s", header_names)
-
-    request_id = getattr(context, "aws_request_id", None)
-    try:
-        version = _pg_version()
-    except Exception:
-        # detail stays in the log, keyed by request id; the caller gets no internals (AD-12)
-        logger.exception("db error, request_id=%s", request_id)
-        return _resp(500, {"error": {
-            "code": "internal",
-            "message": "internal error",
-            "request_id": request_id,
-        }})
-
-    return _resp(200, {
-        "service": "auth",
-        "postgres": version,
-        "headers_received": header_names,
-    })
+    return dispatch(router, event, context)
