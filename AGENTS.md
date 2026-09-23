@@ -545,6 +545,21 @@ directory.
 The Lambda-layer option is not wrong, but it costs new Terraform, a second artifact to
 version, and it has the *same* local-dev blind spot, so it buys nothing here.
 
+#### Single-module dependencies break the service-dir allow-list (found 2026-09-23)
+
+`start-dev.sh` pip-installs each service's dependencies into the service dir for
+hot-reload. Most land as package *directories*, which the allow-list ignores. But some
+install as a single top-level module — `typing_extensions.py`, pulled in by `pydantic` —
+and the allow-list (`!/backend/[!_]*/*.py`) tracks every top-level `.py`, and coverage
+counts it. Result: the file was committed in `154b817` and the coverage gate fell to 15%.
+Fixed in `6d1c9cd` by listing it explicitly in `.gitignore` and `.coveragerc`.
+
+**Open follow-up:** that list is manual, so the next single-module dependency repeats
+the failure. The robust fix is for `start-dev.sh` to read each installed
+`*.dist-info/RECORD` after pip runs and write the top-level names into a generated,
+itself-ignored `backend/<svc>/.gitignore`; coverage needs a matching mechanism. Until
+then: after adding a dependency, run `git status` and the test gate before committing.
+
 #### The second duplication axis, which is easy to miss
 
 `pip_requirements = true` means each service's **own** `requirements.txt` drives its pip
@@ -762,6 +777,17 @@ Function URLs hand the whole path and method to one handler; there are no gatewa
 - **Built 2026-09-23:** `backend/_shared/router.py` (`Router`, `NotFound`,
   `MethodNotAllowed`), with `backend/_shared/tests/test_router.py` — 17 test cases, router at
   100% coverage.
+- **Bug found and fixed (2026-09-23): specificity, not registration order.** The first
+  implementation tried patterns in registration order and returned on the first match, so a
+  param route like `/{incident_id}` registered before a literal route like `/summary` shadowed
+  it — `POST /boom` (a later literal route) came back `405` instead of reaching its handler.
+  `resolve()` now collects every pattern that matches the path, sorts by specificity (fewest
+  captured params first, so a literal segment always beats a `{param}` regardless of
+  registration order), and only then checks the method; `405` is raised only once no matching
+  pattern has the method, with `Allow` listing the union of methods across every matching
+  pattern. Three tests pin this: `test_literal_segment_beats_a_param_regardless_of_registration_order`,
+  `test_method_on_a_less_specific_pattern_still_matches`,
+  `test_405_lists_methods_from_every_matching_pattern`.
 
 ### AD-06 · URL/base-path convention and frontend API client
 
@@ -1045,6 +1071,13 @@ no gain.
   rules.
 - **Already settled elsewhere:** three roles, no fourth (AD-21); mechanism shared, policy
   per service (AD-17); note edit/delete authority (AD-01 → Ticket notes).
+- **Built 2026-09-23:** `backend/_shared/authz.py` — `User(id, role)`, `ROLES`, and
+  `authenticate(event)`. Until M3 implements RS256 verification, `authenticate` is a stub that
+  unconditionally raises `Unauthenticated` — **closed by default in practice, not just in
+  principle:** every non-public route currently returns `401` to every caller, because there is
+  no way yet to become an authenticated user. `backend/_shared/router.py`'s `add()` still
+  enforces the registration-time rule (`roles={...}` xor `public=True`, roles must be a known
+  member of `ROLES` or `ValueError` at import time).
 
 ### AD-10 · Frontend dependency set
 
@@ -1109,9 +1142,13 @@ Vitest is the native fit and Jest needs extra ESM configuration.
   `sync-shared.sh`) and provides `load_service`, loading each Lambda's `function.py` under
   a unique module name; `pytest.ini` uses `--import-mode=importlib` because every service's
   test file is named `test_function.py`. `.coveragerc` omits `backend/conftest.py`.
-- **Current status (2026-09-23, uncommitted):** 41 tests pass — 17 router
-  (`backend/_shared/tests/test_router.py`), 7 DB helper (`backend/_shared/tests/test_db.py`),
-  4 `auth` (`backend/auth/tests/test_function.py`), 13 `_migrate`
+- **Current status (2026-09-23, uncommitted):** 80 tests pass — router
+  (`backend/_shared/tests/test_router.py`, now including the 3 specificity-bug tests under
+  AD-05), DB helper (`backend/_shared/tests/test_db.py`), the new `backend/_shared/tests/test_http.py`
+  (the AD-12 `dispatch` wrapper: routing/access, request-body parsing and validation, database
+  backstops, correlation id and access-log behaviour) and `backend/_shared/tests/test_log.py`
+  (the AD-16 `JsonFormatter`/`setup`), `auth` (`backend/auth/tests/test_function.py`, updated for
+  the `dispatch`-based handler and the no-fingerprinting health response), and `_migrate`
   (`backend/_migrate/tests/test_function.py`: real `001_init` from scratch + idempotent
   rerun, edited-file detection, failing-migration rollback, misnamed file, admin seeding —
   once, normalised email, missing credentials x3, plaintext refused, registered email not
@@ -1176,6 +1213,42 @@ The guide demands a "consistent format" and never specifies one.
   recognised standard, but its `type` URIs and extra members are ceremony a single
   first-party frontend does not need. Named in the README as the considered alternative.
 
+#### Built 2026-09-23: `errors.py` + `http.py`
+
+- **`_shared/errors.py`:** `ApiError(message, fields=None)` base (`status=500`, `code="internal"`)
+  and the fixed subclasses from the code table above — `BadRequest`/`ValidationFailed` (400),
+  `Unauthenticated` (401), `Forbidden` (403), `NotFound` (404), `MethodNotAllowed(allowed)` (405,
+  carries the `Allow` list), `Conflict` (409).
+- **`_shared/http.py`:** `dispatch(router, event, context)` is the one entry point every
+  `function.py` calls. In order: resolve the correlation id (UUID-validated against the incoming
+  `X-Correlation-Id`, falling back to `aws_request_id`/a generated UUID, with a warning on a
+  malformed value — AD-16); resolve the route (AD-05); if not `public`, `authz.authenticate` then
+  a role check (`403` if the role isn't in `route.roles` — AD-09); parse the body (`isBase64Encoded`
+  → base64 decode → JSON, any failure → `400 bad_request`); call the handler; map every exception
+  to the envelope (`ApiError` subclasses → their own status/code; `pydantic.ValidationError` → 400
+  `validation_failed` with per-field messages; `psycopg.errors.ForeignKeyViolation` → 400;
+  `UniqueViolation` → 409; `OperationalError`/`InterfaceError` → `reset_conn()` then 500; anything
+  else → logged with a traceback, generic 500). Every response carries `X-Correlation-Id`; a `405`
+  also carries `Allow`. One JSON access line is written per request regardless of outcome (AD-16).
+- **`auth/function.py` now goes through `dispatch`.** The M1 skeleton's `GET /` handler ran
+  `SELECT version()` and returned the full PostgreSQL version string to any caller, plus a
+  `headers_received` diagnostic echoing the request's headers — both are server-fingerprinting /
+  information-disclosure smells on a **public** route. Fixed: the handler now runs `SELECT 1` and
+  returns only `{"service": "auth", "database": "ok"}`. `test_health_does_not_fingerprint_the_server`
+  pins the absence of `"PostgreSQL"` from the response.
+- **`pydantic==2.10.4` added to all three `requirements.txt`** — `_shared/`, `auth/`, and
+  `_migrate/` — because `bin/sync-shared.sh` checks every line of `_shared/requirements.txt`
+  against every target's own file, `_migrate` included, and fails the sync otherwise (AD-02).
+  **Accepted trade-off:** `_migrate` now carries pydantic's ~5 MB in its bundle despite never
+  importing it, because the sync script compares declared dependency lines, not actual per-module
+  imports, and giving it a per-module dependency list is more machinery than a workshop-timeboxed
+  fix justifies.
+- **Verified locally:** 80 tests pass, 100% backend coverage, the 80% gate passes. Live through
+  `:3001` — health returns 200 with no version string; a sent `X-Correlation-Id` is echoed back;
+  `GET /api/auth/nope` → 404 envelope; `POST /api/auth` → 405 with `Allow: GET`; CloudWatch access
+  lines are JSON carrying route pattern, status, duration, and a caller-supplied correlation id
+  distinct from the Lambda request id.
+
 ### AD-13 · Search, filter, and pagination design
 
 A required feature with no specified design.
@@ -1229,8 +1302,10 @@ CloudWatch retention is 7 days and the example uses plain `logging` with no stru
 - **Correlation id:** the frontend generates a UUID per user action and sends
   `X-Correlation-Id`; the wrapper accepts it only if it parses as a UUID (no log
   injection), logs it on every line, echoes it in the response, and falls back to
-  `request_id` when absent. **Consequence:** `bin/proxy-server.js` must forward
-  `x-correlation-id`, or it is silently dropped locally (the M1 header bug again).
+  `request_id` when absent. **Consequence, done 2026-09-23:** `bin/proxy-server.js` now
+  forwards `x-correlation-id` alongside `x-access-token` and `cookie` — it previously forwarded
+  none of the three (the M1 header bug again); without the fix the id would be silently
+  dropped locally only.
 - **Levels:** `INFO` access line and domain events; `WARNING` suspicious activity
   (refresh-token reuse, malformed correlation id); `ERROR` every `500`, with traceback;
   `DEBUG` only when the `LOG_LEVEL` env var asks.
@@ -1240,6 +1315,26 @@ CloudWatch retention is 7 days and the example uses plain `logging` with no stru
   duration, throttles; JSON logs answer the rest through Logs Insights. CloudWatch
   Embedded Metric Format is the no-new-infra upgrade path, recorded in the README as
   deliberately not done.
+
+#### Built 2026-09-23: `_shared/log.py`
+
+- `request_id` and `correlation_id` are held in `contextvars.ContextVar`s, set once per
+  request by `http.dispatch`, so every log line emitted anywhere during that request — not
+  just the access line — carries both without threading them through every call.
+  `JsonFormatter` reads them at format time and merges in a `fields` dict when the caller logs
+  with `extra={"fields": {...}}`. `LOG_LEVEL` env var controls the root logger's level
+  (default `INFO`).
+- **`setup(service)` reformats the Lambda runtime's existing root handler rather than adding a
+  second one.** The Lambda runtime installs its own root `StreamHandler` before user code runs;
+  adding another would double every line in CloudWatch. `setup` only adds a handler if none
+  exist (e.g. under pytest), and always replaces the formatter on whatever handlers are there.
+- **Verified locally:** JSON lines in CloudWatch via `aws logs tail`, with `route`, `status`,
+  `duration_ms`, and a client-supplied correlation id distinct from the Lambda request id.
+- **Unresolved, believed to be a display artifact:** LocalStack's `aws logs tail --follow`
+  appends its own `END RequestId: ...` marker onto the same output line as our JSON log entry,
+  rather than a separate line. This has not been reproduced against real CloudWatch —
+  **verify on the first cloud deploy (M14)** before treating it as anything more than a
+  LocalStack CLI quirk.
 
 ### AD-17 · Incident state machine and transition authority
 

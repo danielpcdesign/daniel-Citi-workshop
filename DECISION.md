@@ -57,7 +57,8 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 | IaC / deploy | Terraform + provided `bin/` scripts | Provided scaffold | pre-session |
 | Product type | Incident ticketing (service desk), not a planning board | Requesters report, admins dispatch, engineers resolve; metrics are MTTA/MTTR | 2026-09-23 |
 | First service (M1) | `auth` as the hello-world service | Exists under any AD-01 outcome, so nothing is built to be thrown away | 2026-09-22 |
-| Dev proxy headers | `bin/proxy-server.js` forwards `x-access-token` and `cookie` | It dropped both, making every local request anonymous | 2026-09-22 |
+| Dev proxy headers | `bin/proxy-server.js` forwards `x-access-token`, `cookie` (2026-09-22), and `x-correlation-id` (2026-09-23) | It dropped all three by default, making every local request anonymous and untraceable | 2026-09-22 |
+| `_migrate` carries pydantic | `pydantic==2.10.4` added to `_migrate/requirements.txt` alongside `_shared/` and `auth/`, though `_migrate` never imports it | `bin/sync-shared.sh` checks declared dependency lines against every target including `_migrate`, not per-module imports; ~5 MB accepted rather than building a per-module dependency list in a timeboxed workshop | 2026-09-23 |
 | Local dependency build | `start-dev.sh` pip targets Python 3.13 / `manylinux2014_x86_64` | Host `pip` belongs to 3.14; compiled wheels failed to import in Lambda | 2026-09-22 |
 | DB credentials | Read with `os.environ[...]`, no fallbacks; `sslmode=require` when not local | Terraform always injects them, so a missing one is a deploy bug, not a default | 2026-09-22 |
 | Incident categories | Fixed DB-checked list of 10 (`electrical` … `software`, `other`) | Answers the categories question with no extra table; one-line migration to change | 2026-09-23 |
@@ -88,6 +89,8 @@ Fixed rules recorded under a parent. AD-09, AD-12, and AD-17 have since closed; 
 | AD-22 | "Not archived" is enforced in the services, not the DB; name uniqueness is DB-enforced among non-archived rows | FKs prove existence, not state; partial unique indexes let an archived name be reused | 2026-09-23 |
 | AD-09 | Only the author edits a note; author or Facility Admin soft-deletes | Admins moderate but never rewrite someone else's words | 2026-09-23 |
 | AD-12 | A PostgreSQL FK violation (`23503`) reaching the error handler maps to `400`, not `500` | The service validates locations first for a precise message; the FK is only the backstop, so reaching it means a caller error the service missed | 2026-09-23 |
+| AD-05 | `router.resolve()` prefers the most specific matching pattern (fewest captured params), independent of registration order; `405` only when no matching pattern has the method, `Allow` lists methods from every matching pattern | Bug found: a `{param}` route registered before a literal route shadowed it, so a later literal route answered `405` instead of reaching its handler | 2026-09-23 |
+| AD-12 | `auth`'s public health route runs `SELECT 1` and returns only `{"service", "database"}` | The M1 handler ran `SELECT version()` and returned the full PostgreSQL version plus a `headers_received` echo on a public route — server fingerprinting | 2026-09-23 |
 
 ## Still open
 
