@@ -26,6 +26,7 @@ in commit `af53415`; a date means it was settled in a working session on that da
 | AD-08c | Access-token transport | `X-Access-Token` header, not `Authorization` | OAC's SigV4 signature occupies `Authorization` | pre-session |
 | AD-17 | Incident state machine | Admin any→any; engineer (assigned only) `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`; employee none; only admins close | No skip keeps the acknowledged timestamp; unblock avoids admin bottleneck; no review state, so admin closing is the confirmation | 2026-09-23 |
 | AD-18 | Visual workflow | MUI `Stepper` per incident + status-grouped board on Admin/Engineer dashboard | Stepper answers the requester, board answers the dispatcher; drag only once AD-17 is enforced server-side | 2026-09-23 |
+| AD-20 | Priority and escalation | `Low…Critical` ranked 1–4; `requested_priority` (employee) + `priority` (admin); escalation = one `escalation_status` field on `incidents`, reason required and posted as a note, admin grants/declines, latest only, no automatic effect | Employees can't self-inflate priority; escalation means different things per issue, so the admin decides the response; no extra table | 2026-09-23 |
 | AD-21 | Registration and roles | Register → Employee only (exact `acme.inc` match, server-side, no verification); admins promote to Engineer/Admin; first admin seeded by `_migrate` from TF vars; `users.role` + 1:1 `engineer_profiles`; demotion auto-unassigns `Open`/`In Progress`/`Blocked` tickets | No path to self-grant a role; no admin-set passwords; bootstrap has no public surface; no orphaned assignments | 2026-09-23 |
 | AD-22 | Facility hierarchy | Three tables; incident `building_id` required, `floor_id`/`seat_id` optional; composite FKs; `archived_at` soft delete; no occupants | Hotspot report is a plain `GROUP BY`; the DB rejects inconsistent locations; archiving keeps history | 2026-09-23 |
 
@@ -75,5 +76,5 @@ Fixed rules recorded under a parent. AD-17 has since closed; AD-09 and M8 are st
 ## Still open
 
 AD-05 · AD-06 · AD-09 · AD-10 · AD-11 · AD-12 · AD-13 · AD-14 · AD-15 ·
-AD-16 · AD-19 · AD-20 — see `AGENTS.md` → Pending architecture
+AD-16 · AD-19 — see `AGENTS.md` → Pending architecture
 decisions.

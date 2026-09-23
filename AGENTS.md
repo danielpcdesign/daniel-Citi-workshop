@@ -93,6 +93,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
+| AD-20 | Priority and escalation | **`Low/Medium/High/Critical`; `requested_priority` (employee, immutable) + `priority` (admin-set). Escalation = employee request an admin grants or declines, held in one `escalation_status` field on `incidents`; reason required and posted as a note; latest request only; no automatic effect; pending requests shown on the admin dashboard via polling.** |
 | AD-21 | Registration and roles | **Self-registration creates Employees only** (exact `acme.inc` domain match, server-side; no email verification). Admins promote users to Engineer (by creating the profile) or Admin. First admin seeded by `_migrate` from Terraform variables. `users.role` + one-to-one `engineer_profiles`. Demotion auto-unassigns active tickets. |
 | AD-22 | Facility hierarchy | **Three tables** (`buildings`, `floors`, `seats`); incident has required `building_id`, optional `floor_id`, optional `seat_id` (needs a floor), kept consistent by composite FKs. Soft delete via `archived_at`. No seat occupants. |
 | — | Auth sequencing | **Authentication and authorization are built before the CRUD they protect**, not retrofitted afterwards. Milestones M3–M4 in `README.md`. |
@@ -362,7 +363,7 @@ Domain-specific, from the facility-incident problem statement:
 | AD-17 | Incident state machine and transition authority | **DECIDED — admin any, engineer forward + unblock, employee none** |
 | AD-18 | Visual workflow representation | **DECIDED — stepper + status board** |
 | AD-19 | Dashboard and reporting strategy | OPEN |
-| AD-20 | Priority and escalation model | OPEN |
+| AD-20 | Priority and escalation model | **DECIDED — requested + working priority; escalation request fields** |
 | AD-21 | Registration, `acme.inc` email restriction, and persona assignment | **DECIDED — Employee-only registration, promotion, seeded admin** |
 | AD-22 | Facility hierarchy modelling | **DECIDED — three tables, composite FKs, soft delete** |
 
@@ -1166,6 +1167,46 @@ The statement explicitly delegates this: "request or manage incident priority/es
   escalation as a separate flag with a reason and timestamp, orthogonal to workflow status.
   Keeping escalation out of the status enum avoids a combinatorial state machine in AD-17.
 
+#### DECIDED — two priority fields; escalation as a request an admin decides (2026-09-23)
+
+**Priority**
+
+- **Scale: `Low` / `Medium` / `High` / `Critical`**, stored as a ranked value (1–4) so
+  sorting by priority is numeric, with labels in the API. Unambiguous to employees, unlike
+  P1–P4.
+- **Two fields.** `requested_priority` — the employee's pick at creation, never changed.
+  `priority` — the working value, initialised to the request and set by an admin at
+  triage (naturally while `Unassigned`, AD-17). The gap between them shows how often
+  requests are corrected.
+- **Only admins change `priority`.** Engineers and employees cannot.
+
+**Escalation**
+
+- **A request the employee makes and an admin decides.** Granting triggers nothing
+  automatically: escalation means different things for different issues, so the admin
+  chooses the response (raise priority, reassign, act outside the system).
+- **One field on `incidents`:** `escalation_status` ∈ {`none`, `pending`, `granted`,
+  `declined`}. No separate table, no reason or timestamp columns. A new request overwrites
+  the previous status — past requests and decisions are **not** kept. Accepted trade: the
+  navigation is simpler, and request history is not a question the app must answer.
+- **The reason lives in the conversation.** A request requires a reason, posted as a note
+  in the same transaction that sets `pending` (like `Blocked`). "Why is it escalated" and
+  "when was it requested" are read from that note. Trade: notes are soft-deletable by
+  their author (AD-01 → Ticket notes), so the reason can be hidden, and the report joins
+  to notes rather than reading a column.
+- **Employee:** may request on their own incident, any status except `Closed`, with a
+  required reason, whenever `escalation_status` is not `pending`.
+- **Admin:** grants or declines a pending request, and may reset a granted one to `none`.
+  The decision is posted as a note so the employee is informed; the note is the only
+  record of it.
+- **"Escalated"** = `escalation_status = 'granted'` on a non-`Closed` incident — the answer
+  to "which incidents are escalated, and why".
+- **Engineers take no part.** They raise problems through `Blocked`.
+- **Admin dashboard:** a pending-requests panel with a count badge, refreshed by polling.
+  No push — `infra/` has no WebSocket/push path (AD-14). Lives in the `incidents` service.
+- **No automatic escalation by age/SLA** — it needs a scheduled job and `infra/` has none.
+  Ticket age is shown on the dashboard instead (AD-19). Stated scope cut.
+
 ### AD-21 · Registration, email restriction, and persona assignment
 
 - **Decide:** how the `acme.inc` email restriction is enforced (validate the domain at
@@ -1208,8 +1249,8 @@ The statement explicitly delegates this: "request or manage incident priority/es
   to `Unassigned` (AD-17), with a system-supplied reason ("assignee removed from the
   engineer role") stored on the history row and posted as a note; the actor is the admin
   who demoted them. `Resolved` and `Closed` incidents keep their assignee — the work is
-  done, and moving a `Resolved` ticket back would undo the resolution. *(Scope of
-  "currently assigned" is an interpretation; confirm.)*
+  done, and moving a `Resolved` ticket back would undo the resolution. *(Confirmed
+  2026-09-23.)*
 
 ### AD-22 · Facility hierarchy modelling
 
