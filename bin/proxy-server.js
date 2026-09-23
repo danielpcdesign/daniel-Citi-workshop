@@ -64,9 +64,10 @@ const server = http.createServer((req, res) => {
 
   const endpointName = pathParts[1];
   const remainingPath = pathParts.length > 2 ? '/' + pathParts.slice(2).join('/') : '';
-  const targetUrl = endpoints[endpointName] + remainingPath + (parsedUrl.search || '');
 
-  if (!targetUrl) {
+  // check before concatenating: a missing entry would otherwise become the string "undefined/..."
+  // hasOwn, not truthiness, so names like "constructor" don't resolve to Object.prototype members
+  if (!Object.hasOwn(endpoints, endpointName)) {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       error: `Unknown endpoint: ${endpointName}`,
@@ -74,6 +75,8 @@ const server = http.createServer((req, res) => {
     }));
     return;
   }
+
+  const targetUrl = endpoints[endpointName] + remainingPath + (parsedUrl.search || '');
 
   console.log(`${req.method} /api/${endpointName} -> ${targetUrl}`);
 
