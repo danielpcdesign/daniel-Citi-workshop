@@ -55,6 +55,11 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 | Dev proxy headers | `bin/proxy-server.js` forwards `x-access-token` and `cookie` | It dropped both, making every local request anonymous | 2026-09-22 |
 | Local dependency build | `start-dev.sh` pip targets Python 3.13 / `manylinux2014_x86_64` | Host `pip` belongs to 3.14; compiled wheels failed to import in Lambda | 2026-09-22 |
 | DB credentials | Read with `os.environ[...]`, no fallbacks; `sslmode=require` when not local | Terraform always injects them, so a missing one is a deploy bug, not a default | 2026-09-22 |
+| Incident categories | Fixed DB-checked list of 10 (`electrical` … `software`, `other`) | Answers the categories question with no extra table; one-line migration to change | 2026-09-23 |
+| Incident deletion | Admin-only soft delete (`deleted_at`, `deleted_by`) | CRUD `DELETE` without erasing the history reports depend on | 2026-09-23 |
+| Engineer availability | `engineer_profiles.is_available`, toggled by engineer or admin | Answers "which engineers are available" directly | 2026-09-23 |
+| Note kinds | `ticket_notes.kind` ∈ comment/blocked/escalation/unassigned | Reason-bearing notes are identifiable by query | 2026-09-23 |
+| Schema conventions | Codes not labels; `TEXT`+`CHECK` not `ENUM`; `BIGINT` identity keys; refresh tokens as sha256 | Simple migrations, readable ids, deterministic token lookup | 2026-09-23 |
 | Service-dir gitignore | Allow-list: only `*.py`, `requirements.txt`, `tests/` tracked | pip installs into the service dir; package names cannot be enumerated | 2026-09-22 |
 
 ## Rules settled beneath a parent decision
@@ -71,6 +76,9 @@ Fixed rules recorded under a parent. AD-17 has since closed; AD-09 and M8 are st
 | AD-17 | Added `Unassigned` status before `Open`; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee (code + DB `CHECK`) | Triage queue is a status filter; time-to-assign is an ordinary transition. Deliberate deviation from the brief's five statuses | 2026-09-23 |
 | AD-17 | Only admins reassign, and only via `Unassigned` with a required reason (history + note, like `Blocked`) | Every hand-off becomes a recorded transition, so a ticket that has passed through many engineers is visible | 2026-09-23 |
 | AD-17 | Status history carries `assignee_id` (assignee after each transition) | Counts engineers per ticket from the existing history — no separate assignment table | 2026-09-23 |
+| AD-17 | `incident_status_history` is append-only, enforced by a trigger rejecting `UPDATE`/`DELETE` | The timing metrics are computed from it; convention alone can be broken by any query | 2026-09-23 |
+| AD-21 | Engineers-only assignment is enforced in the `incidents` service, not the DB (`assignee_id` → `users`) | An FK to `engineer_profiles` would block demotion while closed tickets reference the engineer | 2026-09-23 |
+| AD-22 | "Not archived" is enforced in the services, not the DB; name uniqueness is DB-enforced among non-archived rows | FKs prove existence, not state; partial unique indexes let an archived name be reused | 2026-09-23 |
 | AD-09 | Only the author edits a note; author or Facility Admin soft-deletes | Admins moderate but never rewrite someone else's words | 2026-09-23 |
 
 ## Still open

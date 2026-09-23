@@ -639,6 +639,34 @@ expected to use).
 - **Not decided here:** table designs (M2, AD-17, AD-22) and seeding the first Facility
   Admin (AD-21).
 
+#### Schema decisions for `001_init` (2026-09-23)
+
+- **Categories: fixed list, DB-checked** — `electrical`, `plumbing`, `hvac`, `cleaning`,
+  `furniture`, `access_security`, `network`, `hardware`, `software`, `other`. No
+  categories table; changing the list is a one-line migration. Answers "most common
+  facility and technology issue categories".
+- **Incidents are soft-deleted, admin only** — `deleted_at` + `deleted_by`; hidden from
+  every list, history and notes kept. Satisfies CRUD `DELETE` without destroying report
+  data.
+- **Engineer availability is an explicit flag** — `engineer_profiles.is_available`,
+  toggled by the engineer or an admin (leave, absence). Answers "which engineers are
+  available"; workload is reported separately from open assignments.
+- **Notes carry a `kind`** — `comment`, `blocked`, `escalation`, `unassigned`. Makes the
+  notes AD-17 and AD-20 treat as records (blocked reason, escalation reason, reassignment
+  reason) identifiable by query.
+- **Codes, not labels, in the DB** — statuses `unassigned`, `open`, `in_progress`,
+  `blocked`, `resolved`, `closed`; priority `1..4` = Low..Critical. Labels belong to the API
+  and UI.
+- **`TEXT` + `CHECK`, not PostgreSQL `ENUM`** — extending a `CHECK` is an ordinary
+  migration; `ALTER TYPE … ADD VALUE` has transaction restrictions.
+- **`BIGINT` identity keys** — readable (`INC-42`); enumeration is harmless because every
+  read is ownership-checked (AD-09).
+- **Refresh tokens stored as sha256** — high-entropy random values cannot be brute-forced
+  like passwords, and lookup needs a deterministic hash, which bcrypt's salt prevents.
+- **FK violations must map to `400`, not `500`** (for AD-12): the service validates
+  locations first for a precise message; the composite FKs are the backstop, and PostgreSQL
+  `23503` reaching the error handler means a caller error the service missed.
+
 ### AD-04 · DB access layer and connection reuse
 
 The example (`postgres_service.py`) uses raw `psycopg` 3 with a module-scope `PG_CONN`,
@@ -1085,6 +1113,9 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 - **Ownership:** an engineer may transition only incidents assigned to them.
 - **Every transition** writes one `incident_status_history` row (from, to, actor, reason,
   timestamp) in the same transaction as the status update (AD-04).
+- **History is append-only, enforced by the database** (2026-09-23): a trigger rejects
+  every `UPDATE` and `DELETE` on `incident_status_history`, so no code path — or manual
+  query — can rewrite the record the timing metrics are computed from.
 - **Enforcement — recommended, pending AD-09:** the transition table lives **in the
   `incidents` service** (e.g. `backend/incidents/workflow.py`), not in `_shared/`. AD-01
   makes `incidents` its only consumer, and `_shared/` is for code more than one service
@@ -1275,6 +1306,11 @@ The statement explicitly delegates this: "request or manage incident priority/es
 - **Data model:** `users.role` ∈ {`employee`, `engineer`, `admin`}, one role per user.
   `engineer_profiles.user_id` is a unique FK — one-to-one — holding engineer-only fields
   (M7). **Assignment references the user**, so login identity and assignee cannot drift.
+- **"Only engineers are assignees" is NOT enforced by the database** (2026-09-23).
+  `incidents.assignee_id` references `users`, not `engineer_profiles`: an FK to the profile
+  would make the profile undeletable while `Resolved`/`Closed` tickets still reference a
+  demoted engineer. The `incidents` service must check `role = 'engineer'` on every
+  assignment, in the same transaction as the write — it is the only guard.
 - **Role changes take effect at the next access-token refresh** (minutes), since the role
   travels as a claim (pending AD-09).
 - **Demoting an engineer auto-unassigns their active tickets**, in the same transaction as
@@ -1320,7 +1356,13 @@ report.
   for new incidents; existing incidents keep pointing at them, so hotspot history stays
   whole. Archiving a building archives its floors and seats in one transaction (AD-04).
   Hard delete is blocked by the FKs (`ON DELETE RESTRICT`).
-- **Names unique within their parent:** floor name per building, seat label per floor.
+- **Names unique within their parent:** building name globally, floor name per building,
+  seat label per floor — case-insensitive, via partial unique indexes over non-archived
+  rows only, so an archived "HQ" does not block a new "HQ".
+- **"Not archived" is NOT enforced by the database** (2026-09-23). An FK proves a row
+  exists, not that `archived_at` is null. The `facilities` service must refuse a floor on an
+  archived building or a seat on an archived floor; the `incidents` service must refuse an
+  incident on an archived building, floor, or seat.
 - **No seat occupants.** The spec never maps people to seats; users carry no `seat_id`.
   Stated scope cut.
 - **Ownership:** the `facilities` service (AD-01). Facility Admin writes; every

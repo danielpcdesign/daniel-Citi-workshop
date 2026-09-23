@@ -21,7 +21,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | # | Milestone | Scope | State |
 |---|---|---|---|
 | M1 | Environment validated | VDI, `start-dev.sh`, hello-world service reachable on `:3001`, frontend on `:3000` | Done locally — `auth` answers through `:3001`, `X-Access-Token` reaches the handler. Cloud header check under OAC pending (M14) |
-| M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | Not started |
+| M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | In progress — `001_init` applied locally through Terraform; 18 constraint cases verified. First-admin seeding and a cloud apply pending |
 | M3 | Authentication | Registration gated to `acme.inc`, password hashing, JWT issue and verify | Not started |
 | M4 | Authorization | Three personas, role **and** row-level ownership, one shared enforcement point | Not started |
 | M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | Not started |
@@ -227,6 +227,28 @@ Three of the seven questions the application must answer are about *time*: how q
 Adding that table in week two does not backfill it. Every incident created before it exists has no history and never will, and the dashboards in M10 would be computed over a partial record while appearing complete. That is why M2 leads the milestone order and why the history table is named explicitly in its scope rather than left to emerge.
 
 The same table answers *"which incidents are escalated or blocked, and why"* — the blocked reason belongs on the transition, not on the incident.
+
+## Where each rule is enforced
+
+The database enforces what it can express; everything else has exactly one owner in a service. Graders and reviewers should be able to find every guarantee here.
+
+| Rule | Enforced by |
+|---|---|
+| Email is lowercase and `@acme.inc` | Database `CHECK` (backstop) + `auth` service (user-facing message) |
+| An incident's floor belongs to its building; its seat to its floor | Database composite foreign keys |
+| A seat needs a floor | Database `CHECK` |
+| `unassigned` exactly when there is no assignee | Database `CHECK`, on `incidents` and on history rows |
+| `Blocked`, and reassignment back to `unassigned`, need a reason | Database `CHECK` on history rows |
+| Status history is never updated, deleted, or truncated | Database trigger |
+| Referenced rows (locations, users, incidents) are never hard-deleted | Database foreign keys |
+| Location and category values are from the allowed set | Database `CHECK` |
+| Names unique within their parent, among non-archived rows | Database partial unique indexes |
+| **Only engineers are assignees** | **`incidents` service** — `assignee_id` references `users`, so the database cannot tell an engineer from an employee |
+| **No incident on an archived building, floor, or seat; no floor or seat under an archived parent** | **`incidents` / `facilities` services** — a foreign key proves a row exists, not that it is active |
+| Who may make which status change (AD-17) | `incidents` service (`workflow.py`) |
+| Role and ownership checks (AD-09) | Shared mechanism in `_shared/`, per-service policy |
+
+The schema itself is in `backend/_migrate/migrations/`; a read-only snapshot for reading is `backend/_migrate/schema.snapshot.sql`, regenerated after each migration with `pg_dump --schema-only`.
 
 ## Decisions
 
