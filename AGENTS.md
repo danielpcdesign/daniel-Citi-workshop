@@ -92,6 +92,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-08a | Token storage | **Refresh token in an httpOnly cookie** (`Secure; SameSite=Strict; Path=/api/auth/refresh`), same-origin via CloudFront. **Access token in memory only.** Single-flight refresh. |
 | AD-08b | Origin sealing | **Function URLs move to `authorization_type = "AWS_IAM"` behind a CloudFront OAC** (`origin_type = "lambda"`), so only the distribution can invoke them. |
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
+| AD-09 | RBAC enforcement | **Role as a JWT claim; every route declares `roles` or `public` at registration or the service fails to start; ownership filtered in SQL for lists and checked by per-service policy for single rows; `404` for unseen, `403` for seen-but-forbidden; frontend takes permitted actions from the API.** |
 | AD-11 | Test stack | **pytest + `pytest-cov` (backend), Vitest + React Testing Library (frontend), Cypress (E2E).** Coverage thresholds enforced in tool config, so a run below target fails. |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
@@ -351,7 +352,7 @@ but **none is settled until confirmed** — record the outcome here and in the R
 | AD-06 | URL/base-path convention and frontend API client | OPEN |
 | AD-07 | Auth mechanism and placement | **DECIDED — RS256 JWT + rotating refresh tokens** |
 | AD-08 | Browser token storage, origin sealing, token transport | **DECIDED** |
-| AD-09 | RBAC enforcement model | OPEN |
+| AD-09 | RBAC enforcement model | **DECIDED — JWT role claim, closed-by-default routes, SQL-filtered ownership** |
 | AD-10 | Frontend dependency set | OPEN |
 | AD-11 | Test stack | **DECIDED — pytest, Vitest + RTL, Cypress; enforced thresholds** |
 | AD-12 | Error envelope and validation approach | OPEN |
@@ -1013,6 +1014,34 @@ no gain.
 - **Settled beneath this decision** (AD-01 → Ticket notes): notes are soft-deleted, never
   hard-deleted; only the author edits a note; the author or a Facility Admin may
   soft-delete it. The rest of the decision stays `OPEN`.
+
+#### DECIDED — role claim, closed-by-default routes, SQL-filtered ownership (2026-09-23)
+
+- **Role travels as a JWT claim**, read from the verified access token; no per-request
+  database lookup. The refresh endpoint re-reads the role from `users`, so a role change
+  takes effect within one access-token lifetime. *Proposed lifetime: 15 minutes — to be
+  fixed at M3 with AD-07.*
+- **Every route declares its access at registration, or the service refuses to start.**
+  `router.on(method, pattern, roles={...})` or `public=True`; a route with neither raises
+  at import time. Closed by default — a forgotten check is a startup failure, not a
+  silent hole (the "verified in some handlers but not others" failure AD-07 rules out).
+- **Ownership is service policy, never generic.** Lists filter in SQL by role (employee
+  `WHERE reporter_id = me`, engineer `WHERE assignee_id = me`, admin unfiltered) — never
+  fetch-all-then-filter. A single row is loaded, then checked by the service's own policy
+  module (e.g. `incidents/policy.py: can_view(user, incident)`). Notes inherit the parent
+  incident's check (AD-01).
+- **`404` for what the caller cannot see; `403` for what they can see but not do.**
+  Incident ids are sequential, so a `403` on someone else's ticket would confirm it
+  exists. An engineer closing their own assigned ticket sees it, so gets `403`.
+- **The frontend never holds its own copy of the rules.** Responses carry the caller's
+  permitted actions per resource (the `allowed_transitions` pattern from AD-17, applied
+  generally); `/me` returns the role for navigation. The server re-checks every request.
+- **Where the code lives:** `_shared/authz.py` — current user from the verified token
+  (token verification itself is M3), `Forbidden` / `NotFound`, the route-level role
+  check wired into the router. Each service — its `policy.py`: ownership and per-action
+  rules.
+- **Already settled elsewhere:** three roles, no fourth (AD-21); mechanism shared, policy
+  per service (AD-17); note edit/delete authority (AD-01 → Ticket notes).
 
 ### AD-10 · Frontend dependency set
 
