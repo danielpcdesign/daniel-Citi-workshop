@@ -95,6 +95,9 @@ else
     terraform init -reconfigure
 fi
 
+# Vendor backend/_shared into each Lambda before terraform zips them (AD-02); both local and aws
+"$SCRIPT_DIR/sync-shared.sh"
+
 # Apply Terraform configuration automatically
 terraform apply -auto-approve
 echo "INFO: Infrastructure deployment complete!"

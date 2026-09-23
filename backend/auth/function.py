@@ -1,7 +1,7 @@
 import json
 import logging
 
-from db import pg_version
+from shared.db import get_conn, reset_conn
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -15,6 +15,17 @@ def _resp(status: int, body: dict) -> dict:
     }
 
 
+def _pg_version() -> str:
+    try:
+        with get_conn().cursor() as cur:
+            cur.execute("SELECT version();")
+            row = cur.fetchone()
+            return row[0] if row else "unknown"
+    except Exception:
+        reset_conn()
+        raise
+
+
 def handler(event=None, context=None):
     event = event or {}
     # names only, never values: x-access-token and cookie carry credentials
@@ -22,7 +33,7 @@ def handler(event=None, context=None):
     logger.info("headers received: %s", header_names)
 
     try:
-        version = pg_version()
+        version = _pg_version()
     except Exception as e:
         logger.error("db error: %s", e)
         return _resp(500, {"error": "database unavailable", "message": str(e)})

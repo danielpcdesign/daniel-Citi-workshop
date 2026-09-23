@@ -327,6 +327,9 @@ else
     echo -e "  Detected Mac/Windows - using host: host.docker.internal"
 fi
 
+# Vendor backend/_shared into each Lambda; hot-reload mounts the dirs directly, so this runs every start
+"$SCRIPT_DIR/sync-shared.sh" || { echo -e "  ✗ Shared-code sync failed"; exit 1; }
+
 # Install pip requirements into each Python service directory for hot-reload
 # Skip if requirements.txt hasn't changed since last install (avoids slow PyPI lookups)
 shopt -s nullglob

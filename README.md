@@ -151,6 +151,7 @@ coding-workshop-participant/
 ├── backend/
 │   ├── _examples/            provided templates — copied out, never edited in place
 │   │   └── python-service/   function.py, postgres_service.py, requirements.txt
+│   ├── _shared/              code used by several Lambdas; vendored as <service>/shared/ (AD-02)
 │   ├── _migrate/             private schema-migration Lambda, no URL (AD-03); migrations/NNN_*.sql
 │   ├── auth/                 sign-in and token issue (AD-07); at M1 a DB-reachability check
 │   └── <service>/            our services — see the discovery rules below
@@ -187,6 +188,10 @@ The obvious fix is a Terraform one. The scaffold uses `terraform-aws-modules/lam
 There is a second duplication axis that is easy to miss. `pip_requirements = true` means each service's **own** `requirements.txt` drives its pip install, so shared code's dependencies must be listed in every service that imports it. Vendoring the code without reconciling the requirements produces a runtime import error rather than a build failure.
 
 The four things that must not be duplicated are token verification, the database connection helper, the error envelope, and the validation models — the four most likely to drift apart silently if they are. Full reasoning is **AD-02** in `AGENTS.md`.
+
+**How it works (built 2026-09-23).** `bin/sync-shared.sh` copies `backend/_shared/*.py` into `backend/<service>/shared/` for every Python service and for `_migrate`, so code imports `from shared.db import get_conn`. It runs from `start-dev.sh` (hot reload reads the directories directly) and from `deploy-backend.sh` before `terraform apply`, in both local and cloud modes. The copies land in a `shared/` subfolder rather than beside `function.py` because the service-dir allow-list tracks every top-level `*.py`; `/backend/*/shared/` is gitignored. The script also checks every line of `_shared/requirements.txt` against each service's `requirements.txt` and **fails the sync** if one is missing — a missing dependency is caught at deploy time, not as an import error in production.
+
+After editing anything in `_shared/`, re-run `./bin/sync-shared.sh`; hot reload picks up the new copies immediately. Never edit a `shared/` folder inside a service — the next sync overwrites it.
 
 ## Architecture
 

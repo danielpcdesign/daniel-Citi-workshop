@@ -264,3 +264,6 @@ tfplan
 !/backend/[!_]*/*.py
 !/backend/[!_]*/requirements.txt
 !/backend/[!_]*/tests/
+
+# vendored copies of backend/_shared (AD-02, bin/sync-shared.sh); _shared itself is the only tracked copy
+/backend/*/shared/

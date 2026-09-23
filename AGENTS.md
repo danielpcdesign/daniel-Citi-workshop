@@ -182,6 +182,8 @@ source ~/.bashrc            # always, in a fresh shell
 ./bin/generate-env.sh       # regenerate frontend/.env.local from Terraform outputs
 ./bin/cleanup-environment.sh  # DESTRUCTIVE - tears down all AWS resources
 
+./bin/sync-shared.sh        # after editing backend/_shared (also run by start-dev/deploy-backend)
+
 # New service
 cp -R backend/_examples/python-service backend/<service-name>
 ./bin/start-dev.sh          # REQUIRED after adding a service
@@ -518,6 +520,16 @@ directory.
 
 - Hook it into `bin/start-dev.sh` and `bin/deploy-backend.sh`, or a small `bin/sync-shared.sh`
   the two call. Verify the hook point before writing it.
+- **Built 2026-09-23:** `bin/sync-shared.sh` copies `_shared/*.py` into
+  `backend/<svc>/shared/` for each discovered Python service **and `_migrate`** (a Lambda
+  outside discovery). Called by `start-dev.sh` every start and by `deploy-backend.sh`
+  before `terraform apply` in both `local` and `aws` modes. Vendored into a `shared/`
+  subfolder, not the service root, because the service-dir `.gitignore` allow-list tracks
+  top-level `*.py`; `/backend/*/shared/` is ignored. The script **fails** if any line of
+  `_shared/requirements.txt` is absent from a target's `requirements.txt` — it checks,
+  never edits tracked files. Contents so far: `db.py` (AD-04 helper: `conn_str`,
+  `get_conn`, `reset_conn`). Verified locally: hot-reload import in `auth`, Terraform-zipped
+  import in `_migrate`, the missing-dependency guard.
 - **Gitignore the vendored copies.** `backend/_shared/` stays the single source of truth in
   version control. Committing N identical copies would recreate, in the diff a grader reads,
   exactly the duplication this exists to avoid.
@@ -958,6 +970,12 @@ Vitest is the native fit and Jest needs extra ESM configuration.
 - **Recommendation:** Vitest + RTL, pytest + `pytest-cov`, Cypress. If you deviate from the
   guide's Jest suggestion, say why in the README — a stated, reasoned deviation reads as
   judgment, an unexplained one reads as an oversight.
+- **To build when the test stack lands (recorded 2026-09-23):** a `_shared` dependency
+  test. Install *only* `backend/_shared/requirements.txt` into a clean environment, then
+  import every module in `_shared/`; any import that fails means an undeclared dependency.
+  Closes the gap `bin/sync-shared.sh` cannot: it compares declared lines exactly, so a
+  dependency nobody declared passes the sync and fails at runtime. Not an import scanner —
+  import names do not map to package names (`import jwt` is `PyJWT`).
 
 ### AD-12 · Error envelope and validation approach
 

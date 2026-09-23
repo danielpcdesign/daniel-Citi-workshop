@@ -2,11 +2,11 @@ import os
 
 from psycopg import Connection, connect
 
-# reused across warm invocations; provisional until AD-04 settles the access layer
+# one connection per warm container (AD-04): a lambda container serves one request at a time
 _conn: Connection | None = None
 
 
-def _conn_str() -> str:
+def conn_str() -> str:
     # os.environ[] not getenv: terraform always injects these, so a missing one is a deploy bug
     parts = [
         f"host={os.environ['POSTGRES_HOST']}",
@@ -25,18 +25,16 @@ def _conn_str() -> str:
 def get_conn() -> Connection:
     global _conn
     if _conn is None or _conn.closed:
-        _conn = connect(_conn_str(), autocommit=True)
+        _conn = connect(conn_str(), autocommit=True)
     return _conn
 
 
-def pg_version() -> str:
+def reset_conn() -> None:
+    # after any error, drop the connection so the next call reconnects instead of reusing a broken one
     global _conn
-    try:
-        with get_conn().cursor() as cur:
-            cur.execute("SELECT version();")
-            row = cur.fetchone()
-            return row[0] if row else "unknown"
-    except Exception:
-        # drop a stale connection so the next invocation reconnects
-        _conn = None
-        raise
+    if _conn is not None:
+        try:
+            _conn.close()
+        except Exception:
+            pass
+    _conn = None
