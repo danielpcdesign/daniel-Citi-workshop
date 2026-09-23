@@ -1,0 +1,14 @@
+[run]
+source = backend
+# count only our own top-level modules; nested dirs are tests, vendored shared/ copies, or
+# pip packages installed into a service dir for hot-reload (same rule as the .gitignore allow-list)
+omit =
+    backend/*/*/*
+    backend/_examples/*
+
+[report]
+# service dirs have no __init__.py; without this, an untested service is silently left out of the total
+include_namespace_packages = true
+# AGENTS.md -> Testing: backend code 80%+; a run below this fails (AD-11)
+fail_under = 80
+show_missing = true

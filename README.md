@@ -163,10 +163,15 @@ coding-workshop-participant/
 ├── AGENTS.md                 spec, architecture facts, decision register (AD-00 … AD-22)
 ├── CLAUDE.md                 working conventions
 ├── README.md                 this file
+├── pytest.ini                 pytest config — path, testpaths, coverage addopts (AD-11)
+├── .coveragerc                coverage.py config — source, omit, namespace packages, 80% gate (AD-11)
+├── requirements-dev.txt       dev-only test tooling; never enters a Lambda bundle (AD-11)
 ├── backend/
 │   ├── _examples/            provided templates — copied out, never edited in place
 │   │   └── python-service/   function.py, postgres_service.py, requirements.txt
 │   ├── _shared/              code used by several Lambdas; vendored as <service>/shared/ (AD-02)
+│   │   ├── router.py         hand-rolled method+path router (AD-05)
+│   │   └── tests/            tests beside code; excluded from every Lambda zip (AD-11)
 │   ├── _migrate/             private schema-migration Lambda, no URL (AD-03); migrations/NNN_*.sql
 │   ├── auth/                 sign-in and token issue (AD-07); at M1 a DB-reachability check
 │   └── <service>/            our services — see the discovery rules below
@@ -282,6 +287,7 @@ Open architecture decisions live in **`AGENTS.md` → Pending architecture decis
 | AD-03 | Schema and migrations | **A private `_migrate` Lambda with no Function URL, run by Terraform during `apply`**, applying numbered forward-only SQL files tracked with checksums. Cloud Aurora is not publicly reachable, so only something inside the VPC can apply the schema — and keeping it out of service discovery means nothing on the internet can trigger it. |
 | AD-04 | Database access | **Raw `psycopg` 3, the example's pattern:** one module-scope connection per warm Lambda container, reopened on error. No pool (a container serves one request at a time) and no ORM. All queries parameterized; any write touching more than one row runs in one transaction. |
 | AD-05 | Routing inside a Lambda | **A ~50-line router of our own in `_shared/`**, not a framework: a table of method + path pattern, `404`/`405` for anything not listed, and path normalisation so the same routes work behind CloudFront and the local proxy. Zero dependencies at 128 MB, and every line is explainable. |
+| AD-11 | Test stack | **pytest (backend), Vitest + React Testing Library (frontend), Cypress (end to end).** Vitest instead of the guide's Jest because this is a Vite project and Vitest runs its config natively, where Jest needs extra ESM setup. Coverage targets are enforced: a run below target fails. |
 | AD-17 | Incident workflow | **Admin: any status to any other. Engineer (assigned tickets only): one step forward, plus unblocking. Employee: none.** Only admins close. New incidents start `Unassigned`; only admins assign, which moves them to `Open`. Reassignment goes back through `Unassigned` with a required reason, so every hand-off is in the history. See diagram below. |
 | AD-18 | Visual workflow | **MUI `Stepper` on each incident** (the requester's "where is my ticket?") **plus a status-grouped board** on the Admin/Engineer dashboard (the dispatcher's "what is stuck?"). Drag-to-transition only after the workflow is enforced server-side. |
 | AD-20 | Priority and escalation | **Employees request a priority; admins set the working one.** Escalation is a request an employee makes and an admin grants or declines — granting changes nothing automatically, because what escalation means depends on the issue. Only its current status is stored on the incident; the employee's reason is posted into the ticket conversation. Pending requests appear on the admin dashboard. |
@@ -341,6 +347,33 @@ Planned shape — *(to be filled as suites land)*:
 Two things that will **not** be covered, recorded now so the absences read as decisions rather than oversights: **CORS preflight**, which is browser-enforced and would assert nothing from a headless runner, and **concurrent workflow transitions**, unless M5 lands early enough to make it honest.
 
 > **A test suite that has not been run lately is not a passing suite, it is an unknown one** — and for any suite containing writes, *"does it still pass?"* and *"what does it do while failing?"* are different questions. Only the first usually gets asked.
+
+### Backend test stack (built 2026-09-23, AD-11)
+
+**Setup**, once per clone:
+
+```sh
+python3.13 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+```
+
+`requirements-dev.txt` pulls `backend/_shared/requirements.txt` via `-r` so shared pins exist once, plus `pytest==8.3.4` and `pytest-cov==6.0.0`. `.venv` is gitignored; nothing in it reaches a Lambda bundle.
+
+**Run:**
+
+```sh
+.venv/bin/pytest
+```
+
+`pytest.ini` (repo root) sets `pythonpath = backend`, `testpaths = backend`, and turns on coverage by default via `.coveragerc`, which enforces `fail_under = 80` (AD-11) — a run under 80% total backend coverage **fails the run**, it does not just report.
+
+- **Layout:** tests sit beside the code they cover — `backend/_shared/tests/`, `backend/<service>/tests/` — never in a parallel tree. Terraform's packaging patterns exclude `tests/.*` from every Lambda zip (`infra/locals.tf`, `infra/migrate.tf`), verified by a real local deploy: the `_migrate` zip carries no `tests/constraints.sql`.
+- **Namespace-package gotcha:** service directories have no `__init__.py`, so `.coveragerc` sets `include_namespace_packages = true` — without it, coverage.py silently dropped `auth/function.py` and `_migrate/function.py` from the total (75% reported vs. the true 34%).
+- **SQL constraint suite** (separate from pytest, `psql` against a live database) is documented in [Where each rule is enforced](#where-each-rule-is-enforced).
+
+**Current status (2026-09-23, uncommitted):** `.venv/bin/pytest` runs 17 tests, all passing, all in `backend/_shared/tests/test_router.py` (the AD-05 router, 100% covered). Total backend coverage is **34%**, so the run **exits 1** against the 80% gate — working as designed, not a bug. Untested: `backend/_shared/db.py`, `backend/auth/function.py`, `backend/_migrate/function.py`.
+
+**No CI pipeline exists yet.** Thresholds are enforced wherever the tests are run (locally, in `.coveragerc` / Vitest config), not by a separate CI check.
 
 ## Deliberately not done
 

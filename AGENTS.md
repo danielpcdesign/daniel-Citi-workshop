@@ -92,6 +92,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-08a | Token storage | **Refresh token in an httpOnly cookie** (`Secure; SameSite=Strict; Path=/api/auth/refresh`), same-origin via CloudFront. **Access token in memory only.** Single-flight refresh. |
 | AD-08b | Origin sealing | **Function URLs move to `authorization_type = "AWS_IAM"` behind a CloudFront OAC** (`origin_type = "lambda"`), so only the distribution can invoke them. |
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
+| AD-11 | Test stack | **pytest + `pytest-cov` (backend), Vitest + React Testing Library (frontend), Cypress (E2E).** Coverage thresholds enforced in tool config, so a run below target fails. |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
 | AD-20 | Priority and escalation | **`Low/Medium/High/Critical`; `requested_priority` (employee, immutable) + `priority` (admin-set). Escalation = employee request an admin grants or declines, held in one `escalation_status` field on `incidents`; reason required and posted as a note; latest request only; no automatic effect; pending requests shown on the admin dashboard via polling.** |
@@ -352,7 +353,7 @@ but **none is settled until confirmed** — record the outcome here and in the R
 | AD-08 | Browser token storage, origin sealing, token transport | **DECIDED** |
 | AD-09 | RBAC enforcement model | OPEN |
 | AD-10 | Frontend dependency set | OPEN |
-| AD-11 | Test stack | OPEN |
+| AD-11 | Test stack | **DECIDED — pytest, Vitest + RTL, Cypress; enforced thresholds** |
 | AD-12 | Error envelope and validation approach | OPEN |
 | AD-13 | Search, filter, and pagination design | OPEN |
 | AD-14 | Real-time and async scope | OPEN |
@@ -754,6 +755,9 @@ Function URLs hand the whole path and method to one handler; there are no gatewa
   Whether AWS does is **unverified — check on the first cloud deploy.** The router matches
   on segments first and decodes only captured parameters, once, so a literal `%` is never
   double-decoded.
+- **Built 2026-09-23:** `backend/_shared/router.py` (`Router`, `NotFound`,
+  `MethodNotAllowed`), with `backend/_shared/tests/test_router.py` — 17 test cases, router at
+  100% coverage.
 
 ### AD-06 · URL/base-path convention and frontend API client
 
@@ -1033,12 +1037,38 @@ Vitest is the native fit and Jest needs extra ESM configuration.
 - **Recommendation:** Vitest + RTL, pytest + `pytest-cov`, Cypress. If you deviate from the
   guide's Jest suggestion, say why in the README — a stated, reasoned deviation reads as
   judgment, an unexplained one reads as an oversight.
+#### DECIDED — pytest, Vitest, Cypress; thresholds enforced (2026-09-23)
+
+- **Backend:** pytest + `pytest-cov`, in a repo-root `.venv` on Python 3.13 (the Lambda
+  runtime) from `requirements-dev.txt`. Dev-only packages never enter a Lambda bundle.
+- **Frontend:** Vitest + React Testing Library — Vitest is native to Vite; Jest (named in
+  `docs/full-stack.md`) needs extra ESM configuration. A stated, reasoned deviation from
+  the guide; say so in the README.
+- **E2E:** Cypress.
+- **Coverage targets are enforced, not reported:** thresholds live in each tool's own
+  config (`fail_under` for coverage.py, `thresholds` for Vitest), so any run below target
+  fails — locally now, and unchanged in CI if one is added. There is no CI pipeline yet.
+- **Layout:** tests sit beside the code — `backend/_shared/tests/`,
+  `backend/<service>/tests/`. `sync-shared.sh` copies only top-level `.py`, so `_shared`
+  tests are never vendored. Terraform patterns exclude `tests/` from every Lambda zip.
 - **To build when the test stack lands (recorded 2026-09-23):** a `_shared` dependency
   test. Install *only* `backend/_shared/requirements.txt` into a clean environment, then
   import every module in `_shared/`; any import that fails means an undeclared dependency.
   Closes the gap `bin/sync-shared.sh` cannot: it compares declared lines exactly, so a
   dependency nobody declared passes the sync and fails at runtime. Not an import scanner —
   import names do not map to package names (`import jwt` is `PyJWT`).
+- **Setup built 2026-09-23:** `.venv` at repo root (Python 3.13, gitignored) from
+  `requirements-dev.txt`; `pytest.ini` (`pythonpath = backend`, `testpaths = backend`,
+  coverage on by default); `.coveragerc` (`source = backend`, `fail_under = 80`).
+- **Namespace-package finding:** service directories under `backend/` have no
+  `__init__.py`. Without `include_namespace_packages = true` in `.coveragerc`, coverage.py
+  silently left `auth/function.py` and `_migrate/function.py` out of the total — it reported
+  75% instead of the true 34%. A gate that silently excludes untested files is worse than
+  no gate; `include_namespace_packages` is required, not optional, for this layout.
+- **First run (2026-09-23, uncommitted):** 17 tests pass (`backend/_shared/tests/`,
+  the AD-05 router), but the suite **exits 1** — total coverage is 34% against the 80%
+  gate, because `_shared/db.py`, `auth/function.py`, and `_migrate/function.py` have no
+  tests yet. The gate is working as designed.
 
 ### AD-12 · Error envelope and validation approach
 

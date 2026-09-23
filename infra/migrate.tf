@@ -29,7 +29,7 @@ module "migrate" {
 
   source_path = [{
     path             = local.migrate_path
-    patterns         = ["!__pycache__/.*", "!\\..*"]
+    patterns         = ["!__pycache__/.*", "!\\..*", "!tests/.*"]
     pip_requirements = true
   }]
 
