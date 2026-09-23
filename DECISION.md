@@ -66,7 +66,8 @@ Fixed rules recorded under a parent. AD-17 has since closed; AD-09 and M8 are st
 | AD-17 | `Blocked` reason stored on the status-history row **and** posted as a note | History is the undeletable record the report reads; the note tells the requester | 2026-09-23 |
 | AD-17 | Incident responses include `allowed_transitions`, computed server-side by the `incidents` workflow module; the UI shows only those | The rules exist once; the UI cannot offer a move the server would refuse | 2026-09-23 |
 | AD-17 | Added `Unassigned` status before `Open`; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee (code + DB `CHECK`) | Triage queue is a status filter; time-to-assign is an ordinary transition. Deliberate deviation from the brief's five statuses | 2026-09-23 |
-| AD-17 | Only admins reassign; reassignment is not recorded | Current distribution comes from the incident's assignee; history of who held a ticket is a stated scope cut | 2026-09-23 |
+| AD-17 | Only admins reassign, and only via `Unassigned` with a required reason (history + note, like `Blocked`) | Every hand-off becomes a recorded transition, so a ticket that has passed through many engineers is visible | 2026-09-23 |
+| AD-17 | Status history carries `assignee_id` (assignee after each transition) | Counts engineers per ticket from the existing history — no separate assignment table | 2026-09-23 |
 | AD-09 | Only the author edits a note; author or Facility Admin soft-deletes | Admins moderate but never rewrite someone else's words | 2026-09-23 |
 
 ## Still open

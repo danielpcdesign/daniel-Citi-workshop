@@ -91,7 +91,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-08a | Token storage | **Refresh token in an httpOnly cookie** (`Secure; SameSite=Strict; Path=/api/auth/refresh`), same-origin via CloudFront. **Access token in memory only.** Single-flight refresh. |
 | AD-08b | Origin sealing | **Function URLs move to `authorization_type = "AWS_IAM"` behind a CloudFront OAC** (`origin_type = "lambda"`), so only the distribution can invoke them. |
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
-| AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. |
+| AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
 | — | Auth sequencing | **Authentication and authorization are built before the CRUD they protect**, not retrofitted afterwards. Milestones M3–M4 in `README.md`. |
 | — | Backend language | Python (mandated by the requirements + recommended by the guides) |
@@ -1085,10 +1085,22 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 - **Rejected:** unassigned as a condition on `Open` (works, but the queue and the
   time-to-assign metric need a second mechanism beside the status history); assignment
   auto-moving to `In Progress` (merges "assigned" and "acknowledged").
-- **Reassignment: admins only, not recorded (2026-09-23).** Reassigning changes the
-  assignee but not the status, so no history row is written. Current work distribution
-  is read from `incidents.assignee`; historical distribution ("who held this ticket
-  before") is a stated scope cut. An engineer cannot hand a ticket to someone else.
+- **Reassignment: admins only, routed through `Unassigned` (2026-09-23).** No direct
+  engineer-to-engineer reassignment. The admin moves the incident to `Unassigned` —
+  **a reason is required**, stored on the history row and posted as a note, exactly like
+  `Blocked` — which clears the assignee; then assigns the new engineer, which moves it
+  `Unassigned → Open`. Both steps are ordinary transitions with history rows. An engineer
+  cannot hand a ticket to someone else.
+- **Status history carries `assignee_id`** — the assignee *after* each transition (null
+  in `Unassigned`). This is what lets history answer "how many engineers has this ticket
+  been through?" (distinct `assignee_id`s) without a separate assignment table; the
+  `actor_id` alone only names the admin who acted.
+- **Consequences:** reassignment restarts the incident at `Open`, so the new engineer
+  acknowledges it again (`Open → In Progress`); a `Blocked` incident leaves `Blocked` on
+  the way, its reason surviving in history and notes. An incident can be assigned and
+  acknowledged more than once, so M10 must define which occurrence each timing metric
+  uses (recommended: first assignment for time-to-assign; per-engineer segments for
+  workload) — not decided here.
 
 ### AD-18 · Visual workflow representation
 
