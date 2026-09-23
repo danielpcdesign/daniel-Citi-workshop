@@ -61,6 +61,7 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 | Note kinds | `ticket_notes.kind` ∈ comment/blocked/escalation/unassigned | Reason-bearing notes are identifiable by query | 2026-09-23 |
 | Schema conventions | Codes not labels; `TEXT`+`CHECK` not `ENUM`; `BIGINT` identity keys; refresh tokens as sha256 | Simple migrations, readable ids, deterministic token lookup | 2026-09-23 |
 | Service-dir gitignore | Allow-list: only `*.py`, `requirements.txt`, `tests/` tracked | pip installs into the service dir; package names cannot be enumerated | 2026-09-22 |
+| Admin seed input | Terraform receives a bcrypt hash, never the password, via the `_migrate` Lambda's invocation input (not env vars); deploy fails when no admin exists and the `TF_VAR_...` vars are unset | Terraform state stores variable values in plain text; a deploy that could silently ship with no admin would leave nobody able to ever promote anyone | 2026-09-23 |
 
 ## Rules settled beneath a parent decision
 

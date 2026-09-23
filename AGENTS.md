@@ -636,8 +636,10 @@ expected to use).
 - **Still unverified — cloud only:** that `_migrate` reaches Aurora through the VPC
   (LocalStack returns no subnets for any function, services included), and that
   `psql` from the VDI really cannot reach Aurora.
-- **Not decided here:** seeding the first Facility Admin (AD-21) — table designs are now
-  decided below, in `001_init`.
+- **Seeding the first Facility Admin (AD-21) is built (2026-09-23).** `_seed_admin` runs
+  here, inside the same advisory lock and transaction as the migrations above, after they
+  apply — table designs for it were decided below, in `001_init`. See AD-21's implementation
+  note for behaviour and local verification.
 
 #### Schema decisions for `001_init` (2026-09-23)
 
@@ -1325,6 +1327,24 @@ The statement explicitly delegates this: "request or manage incident priority/es
   who demoted them. `Resolved` and `Closed` incidents keep their assignee — the work is
   done, and moving a `Resolved` ticket back would undo the resolution. *(Confirmed
   2026-09-23.)*
+- **First-admin seeding built (2026-09-23).** `backend/_migrate/function.py:_seed_admin`
+  runs after `001_init`'s migrations apply, inside the same advisory lock and transaction
+  (AD-03). `infra/migrate.tf` passes `bootstrap_admin_email` / `_name` / `_password_hash`
+  (`infra/variable.tf`) in the Lambda's **invocation input**, not its environment
+  variables, so the values are not left visible in the function's configuration.
+  Terraform receives a **bcrypt hash, never the plaintext password** — Terraform state
+  stores variable values in plain text, and this also means `_migrate` carries no bcrypt
+  dependency. `bootstrap_admin_password_hash` is `sensitive = true`; a plaintext test
+  value did not appear in `terraform output` (`(sensitive value)`). If an admin already
+  exists, seeding is a no-op ("exists"). Otherwise it **fails the deploy** rather than
+  proceeding silently: email or hash unset → error naming the missing `TF_VAR_...`; a
+  value not matching the bcrypt pattern (`$2[aby]$NN$...`, 53 chars) → refuses plaintext;
+  the email already registered under another role → no silent promotion. Verified with
+  real local deploys, throwaway values since removed: no vars → deploy exit `1` with the
+  message; plaintext value → exit `1` "not a bcrypt hash"; valid hash → seeded, `$2b$12$`
+  hash, `bcrypt.checkpw` verifies; redeploy with a changed name → "exists", unchanged;
+  email already an employee → exit `1` "already registered as employee". Local DB has 0
+  users after cleanup. **Cloud apply not yet run.**
 
 ### AD-22 · Facility hierarchy modelling
 

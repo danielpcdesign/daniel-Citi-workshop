@@ -21,7 +21,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | # | Milestone | Scope | State |
 |---|---|---|---|
 | M1 | Environment validated | VDI, `start-dev.sh`, hello-world service reachable on `:3001`, frontend on `:3000` | Done locally — `auth` answers through `:3001`, `X-Access-Token` reaches the handler. Cloud header check under OAC pending (M14) |
-| M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | In progress — `001_init` applied locally through Terraform; 18 database-constraint cases pass (`backend/_migrate/tests/constraints.sql`). First-admin seeding and a cloud apply pending |
+| M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | In progress — `001_init` applied locally through Terraform; 18 database-constraint cases pass (`backend/_migrate/tests/constraints.sql`). First-admin seeding built and verified locally (real deploys: no-vars fails, plaintext fails, valid hash seeds, redeploy is a no-op, taken email fails); remaining = cloud apply |
 | M3 | Authentication | Registration gated to `acme.inc`, password hashing, JWT issue and verify | Not started |
 | M4 | Authorization | Three personas, role **and** row-level ownership, one shared enforcement point | Not started |
 | M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | Not started |
@@ -124,6 +124,21 @@ echo "host all all 0.0.0.0/0 trust" | sudo tee -a /etc/postgresql/18/main/pg_hba
 sudo systemctl restart postgresql
 ss -ltn | grep 5432         # expect 0.0.0.0:5432
 ```
+
+**First admin (one-time).** Any deploy — local or cloud — against a database with no admin **fails** until these are set. Deliberate: no admin means nobody could ever promote anyone, so `_migrate` refuses to proceed silently instead of shipping an unrecoverable database (AD-21). Generate the hash on the VDI (`python3.13` carries `bcrypt` 3.2.0):
+
+```sh
+python3.13 -c 'import bcrypt, getpass; print(bcrypt.hashpw(getpass.getpass().encode(), bcrypt.gensalt(12)).decode())'
+```
+
+Add the result to `~/.bashrc` — not `ENVIRONMENT.config`, which `setup-participant.sh` regenerates — with **single** quotes; the hash contains `$`, which double quotes would expand:
+
+```sh
+export TF_VAR_bootstrap_admin_email='you@acme.inc'
+export TF_VAR_bootstrap_admin_password_hash='$2b$12$...'
+```
+
+Required before the first cloud deploy.
 
 **Apply a new migration locally.** `start-dev.sh` skips Terraform when the backend is already deployed, so run the deploy directly — the `source` is not optional (see Known defects):
 
