@@ -94,6 +94,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
 | AD-09 | RBAC enforcement | **Role as a JWT claim; every route declares `roles` or `public` at registration or the service fails to start; ownership filtered in SQL for lists and checked by per-service policy for single rows; `404` for unseen, `403` for seen-but-forbidden; frontend takes permitted actions from the API.** |
 | AD-11 | Test stack | **pytest + `pytest-cov` (backend), Vitest + React Testing Library (frontend), Cypress (E2E).** Coverage thresholds enforced in tool config, so a run below target fails. |
+| AD-12 | Errors and validation | **Envelope `{error: {code, message, fields?, request_id}}` everywhere; fixed code table (400/401/403/404/405/409/500); `500` never leaks detail; Pydantic v2 for bodies; one `_shared/http.py` entry wrapper maps every exception.** |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
 | AD-20 | Priority and escalation | **`Low/Medium/High/Critical`; `requested_priority` (employee, immutable) + `priority` (admin-set). Escalation = employee request an admin grants or declines, held in one `escalation_status` field on `incidents`; reason required and posted as a note; latest request only; no automatic effect; pending requests shown on the admin dashboard via polling.** |
@@ -272,6 +273,7 @@ VITE_LAMBDA_URLS      # JSON map service -> Lambda Function URL
 | DELETE | `/<service-name>/{id}` | 204 No Content |
 
 Errors: `400` validation/malformed, `404` not found, `500` server or database error.
+Extended by AD-12 with `401`, `403`, `405`, `409` — see AD-12 for the envelope and code table.
 
 - RESTful methods, JSON responses, one consistent error envelope everywhere.
 - Query-parameter filtering where it makes sense (required — search and filter is a feature).
@@ -355,7 +357,7 @@ but **none is settled until confirmed** — record the outcome here and in the R
 | AD-09 | RBAC enforcement model | **DECIDED — JWT role claim, closed-by-default routes, SQL-filtered ownership** |
 | AD-10 | Frontend dependency set | OPEN |
 | AD-11 | Test stack | **DECIDED — pytest, Vitest + RTL, Cypress; enforced thresholds** |
-| AD-12 | Error envelope and validation approach | OPEN |
+| AD-12 | Error envelope and validation approach | **DECIDED — one envelope, fixed codes, Pydantic v2, single wrapper** |
 | AD-13 | Search, filter, and pagination design | OPEN |
 | AD-14 | Real-time and async scope | OPEN |
 | AD-15 | PWA and AI-integration scope | OPEN |
@@ -1131,6 +1133,47 @@ The guide demands a "consistent format" and never specifies one.
   (`23503`) reaching the shared error handler maps to `400`, not `500` — it is a caller
   error the service's own validation missed. The envelope shape and validation approach
   stay `OPEN`.
+
+#### DECIDED — one envelope, fixed codes, Pydantic v2, one entry wrapper (2026-09-23)
+
+- **Envelope, every error, every service:**
+  `{"error": {"code", "message", "fields"?, "request_id"}}`. `code` is stable and
+  machine-readable (the frontend branches on it, never on text); `message` is for humans;
+  `fields` appears only on validation errors, keyed by input name, rendered beside the
+  input; `request_id` is Lambda's `aws_request_id`, so a user-quoted id finds the log line.
+- **Codes:**
+
+  | `code` | HTTP | Raised by |
+  | --- | --- | --- |
+  | `bad_request` | 400 | body is not valid JSON |
+  | `validation_failed` | 400 | Pydantic model failure; FK violation `23503` |
+  | `unauthenticated` | 401 | missing / expired / invalid token (M3) |
+  | `forbidden` | 403 | AD-09: visible but not permitted |
+  | `not_found` | 404 | router; AD-09 cannot-see |
+  | `method_not_allowed` | 405 | router, with an `Allow` header |
+  | `conflict` | 409 | unique violation `23505` (duplicate email, duplicate floor name) |
+  | `internal` | 500 | anything unexpected — generic message only; details go to the log |
+
+  `401`, `403`, `405`, `409` extend the API contract's `400/404/500`; each is required by
+  a decided design (auth, AD-09, AD-05, duplicate handling). State them in the README.
+- **A `500` never carries internal detail.** Exception text can hold hostnames, SQL, or
+  data; it is logged with the `request_id`, never returned. *Fixed 2026-09-23:* the M1 `auth`
+  handler returned `str(e)` in its `500` body; it now logs the detail with the request id
+  and returns the generic envelope, and a test plants a hostname and username in the
+  exception to prove neither reaches the response.
+- **Validation: Pydantic v2.** Request bodies are Pydantic models; their error locations
+  map onto `fields`. Contrast with AD-05: routing a few paths is a table lookup and was
+  hand-rolled, but validation across every endpoint is where hand-written code grows bugs,
+  and the model doubles as documentation of the request. Cost accepted: a compiled
+  dependency (~5 MB) and import time at 128 MB. Added to `_shared/requirements.txt` when
+  first used, so the sync check (AD-02) forces it into every service.
+- **One entry wrapper, `_shared/http.py`,** called by every Lambda's `handler`: normalise
+  and resolve the route (AD-05), apply the route's access rule (AD-09), parse the body
+  (including `isBase64Encoded`), call the handler, and map every exception to the
+  envelope. No handler builds an error response itself.
+- **Considered alternative:** RFC 9457 Problem Details (`application/problem+json`) — the
+  recognised standard, but its `type` URIs and extra members are ceremony a single
+  first-party frontend does not need. Named in the README as the considered alternative.
 
 ### AD-13 · Search, filter, and pagination design
 

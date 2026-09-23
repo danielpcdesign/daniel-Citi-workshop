@@ -24,17 +24,25 @@ def test_event_without_headers(auth, isolated_schema):
     assert auth.handler(None)["statusCode"] == 200
 
 
-def test_database_error_returns_500_and_resets(auth, db_env, monkeypatch):
+def test_database_error_returns_generic_500_and_resets(auth, db_env, monkeypatch, caplog):
     resets = []
 
     def unreachable():
-        raise ConnectionError("no route to host")
+        raise ConnectionError("no route to host db-internal.acme.local:5432 as user superadmin")
+
+    class Context:
+        aws_request_id = "req-123"
 
     monkeypatch.setattr(auth, "get_conn", unreachable)
     monkeypatch.setattr(auth, "reset_conn", lambda: resets.append(True))
-    response = auth.handler({})
+    response = auth.handler({}, Context())
     assert response["statusCode"] == 500
-    assert json.loads(response["body"])["error"] == "database unavailable"
+    assert json.loads(response["body"]) == {"error": {
+        "code": "internal", "message": "internal error", "request_id": "req-123"}}
+    # internals never reach the caller; they reach the log, findable by request id (AD-12)
+    assert "superadmin" not in response["body"]
+    assert "db-internal" not in response["body"]
+    assert "req-123" in caplog.text and "superadmin" in caplog.text
     # a broken connection is dropped so the next invocation reconnects
     assert resets == [True]
 

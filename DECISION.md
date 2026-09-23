@@ -27,6 +27,7 @@ in commit `af53415`; a date means it was settled in a working session on that da
 | AD-08c | Access-token transport | `X-Access-Token` header, not `Authorization` | OAC's SigV4 signature occupies `Authorization` | pre-session |
 | AD-09 | RBAC enforcement | Role as JWT claim; routes declare `roles`/`public` or startup fails; lists filtered in SQL, single rows checked by service `policy.py`; `404` unseen / `403` seen-but-forbidden; UI gets permitted actions from the API | Closed by default; no fetch-then-filter leaks; sequential ids not confirmable by `403`; one copy of the rules | 2026-09-23 |
 | AD-11 | Test stack | pytest + `pytest-cov`; Vitest + RTL; Cypress; thresholds enforced in tool config | Vitest is native to Vite (Jest needs ESM config); enforced targets fail the run instead of being ignored | 2026-09-23 |
+| AD-12 | Errors and validation | One envelope `{code, message, fields?, request_id}`; codes `bad_request`/`validation_failed` 400, `unauthenticated` 401, `forbidden` 403, `not_found` 404, `method_not_allowed` 405, `conflict` 409, `internal` 500; Pydantic v2; single `_shared/http.py` wrapper | Frontend branches on stable codes and shows field errors in place; no leaked internals; validation is where hand-rolled code breaks | 2026-09-23 |
 | AD-17 | Incident state machine | Admin any→any; engineer (assigned only) `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`; employee none; only admins close | No skip keeps the acknowledged timestamp; unblock avoids admin bottleneck; no review state, so admin closing is the confirmation | 2026-09-23 |
 | AD-18 | Visual workflow | MUI `Stepper` per incident + status-grouped board on Admin/Engineer dashboard | Stepper answers the requester, board answers the dispatcher; drag only once AD-17 is enforced server-side | 2026-09-23 |
 | AD-20 | Priority and escalation | `Low…Critical` ranked 1–4; `requested_priority` (employee) + `priority` (admin); escalation = one `escalation_status` field on `incidents`, reason required and posted as a note, admin may set none/granted/declined from any value; every change (request or admin) posts a note with a reason; latest only, no automatic effect | Employees can't self-inflate priority; escalation means different things per issue, so the admin decides the response; no extra table | 2026-09-23 |
@@ -69,7 +70,7 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 
 ## Rules settled beneath a parent decision
 
-Fixed rules recorded under a parent. AD-09 and AD-17 have since closed; AD-12 and M8 are still open.
+Fixed rules recorded under a parent. AD-09, AD-12, and AD-17 have since closed; M8 is still open.
 
 | Parent | Rule | Why | Recorded |
 |---|---|---|---|
@@ -89,6 +90,6 @@ Fixed rules recorded under a parent. AD-09 and AD-17 have since closed; AD-12 an
 
 ## Still open
 
-AD-06 · AD-10 · AD-12 · AD-13 · AD-14 · AD-15 ·
+AD-06 · AD-10 · AD-13 · AD-14 · AD-15 ·
 AD-16 · AD-19 — see `AGENTS.md` → Pending architecture
 decisions.

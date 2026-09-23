@@ -32,11 +32,17 @@ def handler(event=None, context=None):
     header_names = sorted((event.get("headers") or {}).keys())
     logger.info("headers received: %s", header_names)
 
+    request_id = getattr(context, "aws_request_id", None)
     try:
         version = _pg_version()
-    except Exception as e:
-        logger.error("db error: %s", e)
-        return _resp(500, {"error": "database unavailable", "message": str(e)})
+    except Exception:
+        # detail stays in the log, keyed by request id; the caller gets no internals (AD-12)
+        logger.exception("db error, request_id=%s", request_id)
+        return _resp(500, {"error": {
+            "code": "internal",
+            "message": "internal error",
+            "request_id": request_id,
+        }})
 
     return _resp(200, {
         "service": "auth",
