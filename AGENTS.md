@@ -1196,9 +1196,14 @@ The statement explicitly delegates this: "request or manage incident priority/es
   to notes rather than reading a column.
 - **Employee:** may request on their own incident, any status except `Closed`, with a
   required reason, whenever `escalation_status` is not `pending`.
-- **Admin:** grants or declines a pending request, and may reset a granted one to `none`.
-  The decision is posted as a note so the employee is informed; the note is the only
-  record of it.
+- **Admin:** may set `escalation_status` to `none`, `granted`, or `declined` from any
+  value, at any time — deciding a pending request, withdrawing a grant, reversing a
+  decline, or switching between them. `pending` is reachable only through an employee
+  request.
+- **Every escalation change posts a note with a required reason** — the employee's
+  request and every admin change alike, in the same transaction as the status update.
+  The employee is always informed, and the conversation shows reversals; the notes are
+  the only record.
 - **"Escalated"** = `escalation_status = 'granted'` on a non-`Closed` incident — the answer
   to "which incidents are escalated, and why".
 - **Engineers take no part.** They raise problems through `Blocked`.
