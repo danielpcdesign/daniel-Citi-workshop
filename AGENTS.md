@@ -95,6 +95,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-09 | RBAC enforcement | **Role as a JWT claim; every route declares `roles` or `public` at registration or the service fails to start; ownership filtered in SQL for lists and checked by per-service policy for single rows; `404` for unseen, `403` for seen-but-forbidden; frontend takes permitted actions from the API.** |
 | AD-11 | Test stack | **pytest + `pytest-cov` (backend), Vitest + React Testing Library (frontend), Cypress (E2E).** Coverage thresholds enforced in tool config, so a run below target fails. |
 | AD-12 | Errors and validation | **Envelope `{error: {code, message, fields?, request_id}}` everywhere; fixed code table (400/401/403/404/405/409/500); `500` never leaks detail; Pydantic v2 for bodies; one `_shared/http.py` entry wrapper maps every exception.** |
+| AD-16 | Logging | **JSON lines from a stdlib formatter in `_shared/log.py`; one access line per request (route pattern, status, duration, ids); UUID-validated `X-Correlation-Id` echoed and logged, falling back to `request_id`; never log tokens, cookies, secrets, or bodies; no custom metrics.** |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
 | AD-20 | Priority and escalation | **`Low/Medium/High/Critical`; `requested_priority` (employee, immutable) + `priority` (admin-set). Escalation = employee request an admin grants or declines, held in one `escalation_status` field on `incidents`; reason required and posted as a note; latest request only; no automatic effect; pending requests shown on the admin dashboard via polling.** |
@@ -361,7 +362,7 @@ but **none is settled until confirmed** — record the outcome here and in the R
 | AD-13 | Search, filter, and pagination design | OPEN |
 | AD-14 | Real-time and async scope | OPEN |
 | AD-15 | PWA and AI-integration scope | OPEN |
-| AD-16 | Observability and structured logging | OPEN |
+| AD-16 | Observability and structured logging | **DECIDED — JSON lines, access log, correlation id** |
 
 Domain-specific, from the facility-incident problem statement:
 
@@ -1213,6 +1214,32 @@ CloudWatch retention is 7 days and the example uses plain `logging` with no stru
   any metrics.
 - **Recommendation:** JSON logs with a request-scoped correlation ID. Cheap, and it is the
   most direct evidence for the "Observant" soft-skill score.
+
+#### DECIDED — JSON lines, access log per request, correlation id, no custom metrics (2026-09-23)
+
+- **Format: JSON, one object per line,** from a ~20-line stdlib formatter in
+  `_shared/log.py`. Logs Insights can filter and aggregate on fields. Lambda's native
+  `log_format = "JSON"` was considered but its LocalStack support is unverified; our own
+  formatter behaves identically in both environments.
+- **One access line per request, written by the AD-12 wrapper:** `level`, `service`,
+  `request_id`, `correlation_id`, `method`, `route` (the *pattern*, e.g.
+  `/{incident_id}/notes`, so requests group across ids), `status`, `duration_ms`,
+  `user_id`. Handlers add lines only for domain events: status transition, assignment,
+  admin seeded, refresh-token reuse detected.
+- **Correlation id:** the frontend generates a UUID per user action and sends
+  `X-Correlation-Id`; the wrapper accepts it only if it parses as a UUID (no log
+  injection), logs it on every line, echoes it in the response, and falls back to
+  `request_id` when absent. **Consequence:** `bin/proxy-server.js` must forward
+  `x-correlation-id`, or it is silently dropped locally (the M1 header bug again).
+- **Levels:** `INFO` access line and domain events; `WARNING` suspicious activity
+  (refresh-token reuse, malformed correlation id); `ERROR` every `500`, with traceback;
+  `DEBUG` only when the `LOG_LEVEL` env var asks.
+- **Never logged:** tokens, cookies, passwords or hashes, request bodies. Ids and header
+  *names* only.
+- **No custom metrics for the MVP.** Lambda already publishes invocations, errors,
+  duration, throttles; JSON logs answer the rest through Logs Insights. CloudWatch
+  Embedded Metric Format is the no-new-infra upgrade path, recorded in the README as
+  deliberately not done.
 
 ### AD-17 · Incident state machine and transition authority
 
