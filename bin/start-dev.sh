@@ -339,8 +339,14 @@ for req in "$PROJECT_ROOT"/backend/*/requirements.txt; do
         continue
     fi
     echo -e "  Installing pip requirements for $(basename "$svc_dir")..."
-    pip install --quiet --target="$svc_dir" -r "$req" 2>/dev/null || true
-    echo "$REQS_HASH" > "$HASH_FILE"
+    # build for the lambda runtime (python3.13, x86_64), not whatever python the host pip belongs to
+    if pip install --quiet --target="$svc_dir" \
+        --python-version 3.13 --platform manylinux2014_x86_64 --only-binary=:all: \
+        -r "$req"; then
+        echo "$REQS_HASH" > "$HASH_FILE"
+    else
+        echo -e "  ✗ pip install failed for $(basename "$svc_dir"), will retry next run"
+    fi
 done
 
 # Install npm dependencies into each Node.js service directory for hot-reload

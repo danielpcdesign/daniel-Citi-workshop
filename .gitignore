@@ -256,3 +256,11 @@ tfplan
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
+
+# start-dev.sh pip-installs deps straight into each service dir for hot-reload.
+# allow-list our own code; everything else there is a build artifact.
+# _-prefixed dirs (_shared, _examples) are excluded from the rule.
+/backend/[!_]*/*
+!/backend/[!_]*/*.py
+!/backend/[!_]*/requirements.txt
+!/backend/[!_]*/tests/

@@ -204,9 +204,12 @@ reconcile each service's `requirements.txt` with what the shared code imports.
 | Variable | Local | Cloud |
 | --- | --- | --- |
 | `IS_LOCAL` | `true` | `false` |
-| `POSTGRES_HOST` | `localhost` | Aurora endpoint |
+| `POSTGRES_HOST` | `172.17.0.1` (Docker bridge; Linux) | Aurora endpoint |
 | `POSTGRES_PORT` | `5432` | `5432` |
-| `POSTGRES_NAME` / `_USER` / `_PASS` | *(empty)* | Aurora values |
+| `POSTGRES_NAME` / `_USER` / `_PASS` | `postgres` / `postgres` / `postgres123` | Aurora values |
+
+Source: `infra/locals.tf` `env_vars`. All are always injected, so read them with
+`os.environ[...]` and let a missing one fail loudly — never supply a fallback.
 
 Branch on `IS_LOCAL`: local PostgreSQL runs **without SSL**; when `IS_LOCAL` is `false`,
 add `sslmode=require` for Aurora.
@@ -636,7 +639,7 @@ provided infrastructure and it is documented nowhere in the workshop guides.
 
 | Token | Lifetime | Where | Why |
 |---|---|---|---|
-| **Access** | minutes | JavaScript memory, sent as `Authorization: Bearer` | Never persisted, so a reload drops it and the refresh flow re-mints it. Not in a cookie, which keeps every mutating endpoint free of CSRF surface. |
+| **Access** | minutes | JavaScript memory, sent as `X-Access-Token` (AD-08c) | Never persisted, so a reload drops it and the refresh flow re-mints it. Not in a cookie, which keeps every mutating endpoint free of CSRF surface. |
 | **Refresh** | long, revocable | **httpOnly cookie** | `httpOnly` means injected script cannot read it — the point of the decision. This is the credential worth protecting, because it is the long-lived one. |
 
 Cookie attributes: `HttpOnly; Secure; SameSite=Strict; Path=/api/auth/refresh`.
@@ -809,7 +812,7 @@ an SQS dead-letter queue.
 
 - **Options:** scope real-time out and justify it · short polling or optimistic UI ·
   add SQS/EventBridge to Terraform for genuine async work.
-- **Recommendation:** optimistic UI plus short polling on the achievements view; state the
+- **Recommendation:** optimistic UI plus short polling on incident views; state the
   trade-off in the README. Pragmatic decisions are explicitly rewarded.
 
 ### AD-15 · PWA and AI-integration scope
@@ -954,7 +957,8 @@ Do not treat the docs as internally consistent. Confirmed mismatches:
    tests.
 5. PostgreSQL only. Do not reintroduce MongoDB paths from the example code.
 6. Never commit secrets. Participant IDs, AWS region, and the LocalStack token live in
-   `~/.bashrc`; JWT signing secrets come from Lambda environment variables.
+   `~/.bashrc`; the JWT private key comes from Secrets Manager (AD-07b), with a dev key in an env var
+   only when `IS_LOCAL` is true.
 7. When adding a service, update the README with its purpose, endpoints, and test commands
    in the same change.
 8. `./bin/cleanup-environment.sh` is irreversible — never run it without being asked.

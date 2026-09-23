@@ -24,7 +24,7 @@ The user needs to understand the underlying infrastructure, architecture, and wo
 ## 3. Environment (VDI, not this machine)
 The repo is cloned inside an **Amazon WorkSpaces VDI** — a Linux desktop, separate from the Windows machine this session may be running on.
 
-- **Project root (VDI):** `~/coding-workshop-participant`
+- **Project root (VDI):** `~/Desktop/daniel-Citi-workshop` — the fork, cloned directly; no upstream clone alongside it
 - **Shell:** bash on Linux. Not PowerShell. Unix paths, `sudo`, `~/.bashrc`.
 - **Always `source ~/.bashrc` first in a fresh shell** — `AWS_REGION`, `EVENT_ID`, `PARTICIPANT_ID`, `PARTICIPANT_CODE`, and `LOCALSTACK_AUTH_TOKEN` live there and nothing works without them.
 - **Local stack runs in the VDI:** LocalStack `:4566`, frontend `:3000`, Lambda Function URLs `:3001`, PostgreSQL `:5432`. Docker is local to the VDI.
@@ -37,7 +37,7 @@ The repo is cloned inside an **Amazon WorkSpaces VDI** — a Linux desktop, sepa
 ```sh
 # in a VDI terminal
 npm install -g @anthropic-ai/claude-code    # or: curl -fsSL https://claude.ai/install.sh | bash
-cd ~/coding-workshop-participant
+cd ~/Desktop/daniel-Citi-workshop
 source ~/.bashrc
 claude
 ```
@@ -53,7 +53,7 @@ Then `AGENTS.md` and `CLAUDE.md` sit at the repo root and load automatically, fi
 
 **Rejected approaches, so they don't get retried:** SSH into WorkSpaces (not exposed by default; needs security-group and key changes that are almost certainly not yours to make), and clipboard or file-copy sync through the WorkSpaces client (fine for a token, unworkable for a repo).
 
-**Confirm tooling is permitted.** `docs/validation.md` names GitHub Copilot as allowed and is silent on everything else. Check with the organizers before relying on Claude Code for graded work — this is the user's call to make, not an assumption to build on.
+**Tooling is confirmed permitted.** `docs/validation.md` names only GitHub Copilot, but the organizers issued a Claude Code license for this workshop, so Claude Code is approved for graded work.
 
 ## 4. Response shape
 - No bullet walls. Short.

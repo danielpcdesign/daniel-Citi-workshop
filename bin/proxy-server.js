@@ -101,7 +101,10 @@ const server = http.createServer((req, res) => {
       'accept': headers.accept || 'application/json',
       'content-type': headers['content-type'] || 'application/json',
       'user-agent': headers['user-agent'] || 'proxy-server',
-      'host': target.host
+      'host': target.host,
+      // auth credentials: access token (AD-08c) and refresh cookie (AD-08a)
+      ...(headers['x-access-token'] && { 'x-access-token': headers['x-access-token'] }),
+      ...(headers.cookie && { 'cookie': headers.cookie })
     }
   };
 

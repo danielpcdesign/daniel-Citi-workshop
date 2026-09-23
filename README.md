@@ -20,7 +20,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 
 | # | Milestone | Scope | State |
 |---|---|---|---|
-| M1 | Environment validated | VDI, `start-dev.sh`, hello-world service reachable on `:3001`, frontend on `:3000` | Not started |
+| M1 | Environment validated | VDI, `start-dev.sh`, hello-world service reachable on `:3001`, frontend on `:3000` | Done locally — `auth` answers through `:3001`, `X-Access-Token` reaches the handler. Cloud header check under OAC pending (M14) |
 | M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | Not started |
 | M3 | Authentication | Registration gated to `acme.inc`, password hashing, JWT issue and verify | Not started |
 | M4 | Authorization | Three personas, role **and** row-level ownership, one shared enforcement point | Not started |
@@ -101,7 +101,7 @@ The repository lives inside the VDI, not on any local machine. Work happens ther
 | Port | Serves |
 |---|---|
 | `3000` | Frontend (Vite dev server / CloudFront locally) |
-| `3001` | Lambda Function URLs |
+| `3001` | Dev proxy (`bin/proxy-server.js`) → per-service Lambda Function URLs on LocalStack |
 | `4566` | LocalStack |
 | `4556` | S3 website endpoint (LocalStack) |
 | `5432` | PostgreSQL |
@@ -116,6 +116,23 @@ source ~/.bashrc
 
 `./bin/cleanup-environment.sh` destroys all deployed AWS resources and cannot be undone.
 
+**One-time PostgreSQL rebind, per VDI.** The Lambdas run in Docker and reach PostgreSQL at `172.17.0.1`, so it must listen beyond loopback. `start-dev.sh` tries this itself but cannot find the config file on a stock install (see Known defects). Run once in a VDI terminal — `trust` is acceptable only because the VDI is disposable:
+
+```sh
+sudo sed -i "s/#\?listen_addresses\s*=\s*'[^']*'/listen_addresses = '*'/" /etc/postgresql/18/main/postgresql.conf
+echo "host all all 0.0.0.0/0 trust" | sudo tee -a /etc/postgresql/18/main/pg_hba.conf
+sudo systemctl restart postgresql
+ss -ltn | grep 5432         # expect 0.0.0.0:5432
+```
+
+**Verify the backend** — through the proxy, and tail the Lambda log:
+
+```sh
+curl -s http://localhost:3001/api/auth -H "X-Access-Token: dummy"
+AWS_ENDPOINT_URL=http://localhost.localstack.cloud:4566 AWS_REGION=us-east-1 \
+  aws logs tail /aws/lambda/coding-workshop-auth-$PARTICIPANT_ID --since 5m --format short
+```
+
 ## Repository layout
 
 ```
@@ -126,6 +143,7 @@ coding-workshop-participant/
 ├── backend/
 │   ├── _examples/            provided templates — copied out, never edited in place
 │   │   └── python-service/   function.py, postgres_service.py, requirements.txt
+│   ├── auth/                 sign-in and token issue (AD-07); at M1 a DB-reachability check
 │   └── <service>/            our services — see the discovery rules below
 ├── bin/                      provided scripts — setup, start-dev, deploy, generate-env, cleanup
 ├── frontend/
@@ -218,6 +236,9 @@ Found by reading the repository before writing any code. Recorded because each o
 - **`frontend/README.md` lists Material UI and React Router as prerequisites; `package.json` contains neither.** Both are required by the assignment. They must be installed.
 - **`docs/validation.md` lists `docs/implementation.md`, `docs/testing.md`, and `docs/evaluation.md` in its repository tree. None of the three exist.**
 - **The endpoint table and the `curl` examples disagree on the path prefix** — `/{service}` versus `/api/{service}`. (**AD-06**.)
+- **`bin/proxy-server.js` (the `:3001` dev proxy) forwards only four request headers** — `accept`, `content-type`, `user-agent`, `host`. It silently dropped `X-Access-Token` and `Cookie`, so every authenticated request would have arrived anonymous, locally only. Fixed: both are now forwarded when present.
+- **`bin/start-dev.sh` built service dependencies for the wrong Python.** It called bare `pip`, which on the VDI belongs to Python 3.14, while Lambda runs 3.13; compiled wheels (`psycopg-binary`) then failed to import. The failure was hidden by `2>/dev/null || true`, and the success marker was written anyway, so re-running never retried. Fixed: pip now targets `--python-version 3.13 --platform manylinux2014_x86_64`, and the marker is written only on success.
+- **`bin/start-dev.sh` locates `postgresql.conf` with an unprivileged `find`**, which cannot read `/etc/postgresql/<ver>/main/`, so its rebind-to-`0.0.0.0` step fails on a stock install. Done by hand once per VDI; see Environment.
 - **The repository's root README describes a team-management application.** That is generic workshop filler and not this assignment. Where it conflicts with the problem statement, the assignment wins.
 
 ## Testing
