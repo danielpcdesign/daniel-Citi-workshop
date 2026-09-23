@@ -76,6 +76,8 @@ losing every incident's history.
 | AD-00 | Database | **PostgreSQL** (Aurora in cloud). MongoDB/DocumentDB is **not used** — do not add `pymongo`, `MONGO_*` handling, or `TF_VAR_aws_mongo_enabled`. |
 | AD-01 | Service decomposition | **Domain split: `auth`, `incidents` (incl. notes, transitions, history, assignment), `facilities`, `engineers`; `reports` added at M10.** Notes are their own entity and table, deployed inside `incidents` with nested routes. |
 | AD-02 | Shared-code packaging | **Vendor `backend/_shared/` into each service directory as a prebuild step**, gitignoring the copies. Physical presence is the only thing that satisfies both the zip builder and the LocalStack hot-reload mount. Not a Lambda layer, not a second `source_path` entry. |
+| AD-03 | Schema ownership and migrations | **A private `backend/_migrate/` Lambda, declared in its own `infra/migrate.tf` with no Function URL, invoked by Terraform (`aws_lambda_invocation`) during `apply`.** Format: numbered forward-only SQL files with checksums in a `schema_migrations` table. |
+| AD-04 | DB access layer | **Raw `psycopg` 3, as in the example: one module-scope connection per warm Lambda container, opened lazily, dropped and reopened on error.** No pool, no SQLAlchemy. Lives in `_shared/` (AD-02). Multi-row writes in `with conn.transaction():`. |
 | AD-07 | Auth mechanism | **Self-issued JWT, implemented for real** — signed token, carried in `X-Access-Token` (AD-08c), verified in every handler, with expiry. Not OAuth, not Cognito. A sign-in that returns a user without issuing a token does not satisfy this. |
 | AD-07a | Signing algorithm | **RS256.** Only the `auth` service holds the private key; all other services verify with the public key, distributed as a plain env var. |
 | AD-07b | Signing key storage | **AWS Secrets Manager**, private key only, read by the `auth` service alone and cached at module scope. Local dev reads a dev key from an env var. |
@@ -330,8 +332,8 @@ but **none is settled until confirmed** — record the outcome here and in the R
 | AD-00 | Database engine | **DECIDED — PostgreSQL** |
 | AD-01 | Service decomposition | **DECIDED — domain split, five services** |
 | AD-02 | Shared-code packaging | **DECIDED — vendor `_shared/` into each service** |
-| AD-03 | Schema ownership and migrations | OPEN |
-| AD-04 | DB access layer and connection reuse | OPEN |
+| AD-03 | Schema ownership and migrations | **DECIDED — private migrate Lambda, numbered SQL** |
+| AD-04 | DB access layer and connection reuse | **DECIDED — raw psycopg 3, module-scope connection** |
 | AD-05 | Intra-Lambda routing | OPEN |
 | AD-06 | URL/base-path convention and frontend API client | OPEN |
 | AD-07 | Auth mechanism and placement | **DECIDED — RS256 JWT + rotating refresh tokens** |
@@ -541,16 +543,75 @@ Nothing in the repo creates tables. Terraform provisions Aurora; the schema is o
 - **Options:** idempotent `CREATE TABLE IF NOT EXISTS` on cold start (simple, but races
   across N Lambdas and scatters DDL) · one owning migration service or `bin/` step invoked
   at deploy · Alembic · SQL executed from Terraform.
-- **Recommendation:** a single `schema.sql` owned by one place and applied by a deploy step.
-  Do not let each service create its own tables.
+- **Recommendation (superseded, see below):** a single `schema.sql` owned by one place and
+  applied by a deploy step. Do not let each service create its own tables.
 - **Two tables are fixed by decisions already taken and must be in the first schema, not
   added later:** the incident status-history table (AD-17 — it cannot be backfilled) and
   `refresh_tokens` (AD-07d — rotation needs server-side state from the first sign-in).
 - **Depends on:** AD-01.
 
+#### DECIDED — private migrate Lambda, invoked by Terraform; numbered SQL files
+
+**The constraint that decided it:** the Aurora instance in `infra/rds.tf` does not set
+`publicly_accessible` (default `false`), and every Lambda sits in the VPC
+(`infra/lambda.tf:27-28`). So `psql` from the VDI almost certainly cannot reach cloud
+Aurora — inferred from Terraform, **unverified until the first cloud deploy**. Only
+something inside the VPC can apply the schema.
+
+**What runs migrations**
+
+- **`backend/_migrate/`** — the `_` prefix keeps it out of service discovery, so it gets
+  **no Function URL and no CloudFront behaviour**. It is unreachable from the internet;
+  only an IAM-authenticated invoke can run it.
+- **`infra/migrate.tf`** declares it explicitly: same VPC subnets, security groups, and
+  `POSTGRES_*` / `IS_LOCAL` env vars as the services, **no `create_lambda_function_url`**.
+- **`aws_lambda_invocation`** in the same file runs it during `terraform apply`, with a
+  trigger on a hash of `_migrate/migrations/` so any new or changed file re-invokes it. A
+  failed migration fails the apply — a deploy never completes against a schema it does
+  not match.
+- **One place:** SQL, runner, and trigger live in `_migrate/` + `migrate.tf`. No service
+  creates, alters, or drops tables.
+
+**Format**
+
+- `backend/_migrate/migrations/NNN_description.sql`, applied in numeric order.
+- A `schema_migrations(version, checksum, applied_at)` table records what has run.
+- Each file runs in its own transaction; the runner holds `pg_advisory_lock` for the whole
+  run so two applies cannot interleave.
+- **Never edit an applied file.** A changed checksum on an applied version stops the run
+  with an error rather than silently skipping.
+- **Forward only.** No down migrations; a reversal is a new forward file.
+- A read-only `schema.snapshot.sql` (`pg_dump --schema-only`) is regenerated after each
+  migration for reading. It is never applied.
+
+**Rejected:** cold-start `CREATE TABLE IF NOT EXISTS` (DDL scattered across services, races
+on concurrent cold starts); `bin/` + `psql` (works locally, cannot reach cloud Aurora);
+a discoverable `backend/migrate/` service (gets a public Function URL and CloudFront
+route, guarded only by handler logic); one idempotent `schema.sql` (`IF NOT EXISTS` skips
+existing tables, so it can never alter one without data loss — fatal for the status-history
+table); Alembic (its value is autogeneration from SQLAlchemy models, which AD-04 is not
+expected to use).
+
+**Consequences to absorb at M2**
+
+- **Local:** `start-dev.sh` skips `terraform apply` when the backend is already deployed,
+  so a new migration applies locally only after `./bin/deploy-backend.sh local`.
+- **`start-dev.sh`'s pip loop globs `backend/*/requirements.txt`, which includes
+  `_migrate/`.** The vendored packages would land there untracked, and the `.gitignore`
+  allow-list excludes `_`-prefixed dirs. Resolve when `_migrate/` is created — either
+  skip `_` dirs in the loop or extend the ignore rule.
+- **AD-02:** the shared DB helper must be vendored into `_migrate/` too; the sync step
+  must include it explicitly, since `_` dirs are not services.
+- **AD-01 is unchanged:** `_migrate` is infrastructure, not a sixth service.
+- **Verify at M2:** `aws_lambda_invocation` against LocalStack, and that the Terraform
+  module accepts VPC config without a Function URL.
+- **Not decided here:** table designs (M2, AD-17, AD-22) and seeding the first Facility
+  Admin (AD-21).
+
 ### AD-04 · DB access layer and connection reuse
 
-The example opens a fresh connection per invocation with raw `psycopg` 3 and no pooling.
+The example (`postgres_service.py`) uses raw `psycopg` 3 with a module-scope `PG_CONN`,
+reused across warm invocations and reset to `None` on error. No pool library.
 
 - **Options:** raw psycopg3 with a module-scope connection reused across warm invocations
   (plus stale-connection recovery) · `psycopg_pool` · SQLAlchemy Core · SQLAlchemy ORM.
@@ -558,7 +619,37 @@ The example opens a fresh connection per invocation with raw `psycopg` 3 and no 
 - **Recommendation:** raw psycopg3, module-scope lazy connection, reconnect on failure.
   SQLAlchemy Core if the query surface grows past simple CRUD.
 - **Must fix regardless:** add the `sslmode=require` branch on `IS_LOCAL`, and remove the
-  `test/test/test` credential fallbacks.
+  `test/test/test` credential fallbacks. *(Done in `backend/auth/db.py` at M1.)*
+
+#### DECIDED — raw psycopg 3, the example's connection pattern
+
+- **Driver:** `psycopg[binary]==3.2.3`, the example's pin, built for `cp313` (see
+  Known defects in `README.md`).
+- **Connection:** one module-scope connection per warm container, opened on first use,
+  reused while open, set to `None` on any error so the next invocation reconnects. A
+  Lambda container handles one request at a time, so a pool buys nothing — each
+  container would only ever check out one connection.
+- **Credentials:** `os.environ[...]`, no fallbacks; `sslmode=require` unless `IS_LOCAL`.
+- **Location:** the helper moves from `backend/auth/db.py` into `backend/_shared/` and is
+  vendored per AD-02, including into `_migrate/` (AD-03). One copy in git.
+- **Queries are always parameterized** (`cur.execute("... WHERE id = %s", (incident_id,))`),
+  never built with f-strings or `%` formatting. With no ORM, this rule is the whole
+  SQL-injection defence.
+- **Rejected:** `psycopg_pool` (no concurrency inside a container to pool for);
+  SQLAlchemy Core/ORM (a second abstraction to learn and defend, for a CRUD surface plain
+  SQL handles; it would also have been the only reason to prefer Alembic in AD-03).
+- **Deferred to load testing (M13):** RDS Proxy. Connections scale with warm containers ×
+  services; only a load test shows whether Aurora's limit is near.
+- **Verify in cloud:** Aurora Serverless v2 is configured with `min_capacity = 0.0`
+  (`infra/rds.tf`), so it can pause when idle; resuming takes seconds, and the first
+  connection may hit `connect_timeout=15`. Watch for it on the first cloud request.
+- **Multi-row writes run in one transaction** (`with conn.transaction():`) — a status
+  change + its history row, a block + its note, any write touching more than one row.
+  The connection stays `autocommit=True`, so single statements commit alone and a
+  forgotten transaction never holds a lock open across invocations; the explicit block is
+  what makes a group all-or-nothing. Without it, a failure between the two writes leaves
+  an incident with no history row and the dashboards silently wrong. This is what the API
+  contract's "a failed operation must not leave data inconsistent" requires in practice.
 
 ### AD-05 · Intra-Lambda routing
 
