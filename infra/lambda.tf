@@ -50,8 +50,9 @@ module "lambda" {
     max_age           = 0
   }
 
+  # signing material only for auth; every other service gets the shared set (with the public key)
   environment_variables = {
-    for key, value in local.env_vars :
+    for key, value in merge(local.env_vars, each.key == "auth" ? local.auth_env_vars : {}) :
     key => trimspace(value) if try(trimspace(value), "") != ""
   }
 

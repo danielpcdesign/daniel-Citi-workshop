@@ -1,5 +1,7 @@
 # local test tooling only; never packaged into a lambda (each lambda installs its own requirements.txt)
 -r backend/_shared/requirements.txt
+# service-only dependencies (bcrypt in auth) needed to test that service
+-r backend/auth/requirements.txt
 pytest==8.3.4
 pytest-cov==6.0.0
 # omits each service's pip-installed files from coverage (AD-02); see tools/coverage-pip-omit

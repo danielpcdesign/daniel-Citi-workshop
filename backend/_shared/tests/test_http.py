@@ -100,8 +100,7 @@ def test_public_route_needs_no_user(router):
     assert body["query"] == {"status": ["open", "blocked"]}
 
 
-def test_protected_route_is_closed_until_authentication_exists(router):
-    # authz.authenticate is closed by default until M3
+def test_protected_route_without_a_token_is_401(router):
     status, body, _ = call(router, "GET", "/api/incidents/42")
     assert status == 401
     assert body["error"]["code"] == "unauthenticated"

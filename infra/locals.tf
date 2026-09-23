@@ -111,6 +111,8 @@ locals {
     MONGO_NAME    = data.aws_caller_identity.this.id == "000000000000" ? "mongo" : try(one(aws_docdb_cluster.this.*.database_name), "")
     MONGO_USER    = data.aws_caller_identity.this.id == "000000000000" ? "" : try(one(aws_docdb_cluster.this.*.master_username), "")
     MONGO_PASS    = data.aws_caller_identity.this.id == "000000000000" ? "" : try(one(aws_docdb_cluster.this.*.master_password), "")
+    # public, so every lambda gets it: verifying a token needs no secret (AD-07a)
+    JWT_PUBLIC_KEY = tls_private_key.jwt.public_key_pem
   }
   lambda_role_arn = format(
     "arn:%s:iam::%s:role/%s-lambda-%s-%s",

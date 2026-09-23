@@ -895,6 +895,54 @@ invalidated.
 verifying slightly differently from the rest, invisible until exploited), AD-03 (the
 `refresh_tokens` table), AD-08 (where the browser keeps them).
 
+#### M3 build decisions (2026-09-23)
+
+- **Lifetimes:** access token **15 minutes**; refresh token **7 days** (sliding — each
+  rotation issues a fresh 7-day token, so a week of inactivity requires signing in).
+- **Keys: Terraform `tls_private_key` (RSA 2048).** The public key reaches every Lambda as
+  an environment variable; in the cloud the private key goes into a Secrets Manager
+  secret named to match the existing grant (`coding-workshop-*<app_id>*`) and only `auth`
+  reads it; locally `auth` receives the private key as an env var (AD-07b: no dependency on
+  LocalStack's Secrets Manager). Accepted costs: a new provider (`hashicorp/tls`), and the
+  private key also lives in Terraform state — the participant-only S3 state bucket, which
+  already holds the database password. Rejected: hand-generated keys uploaded manually,
+  a step easily lost on an ephemeral VDI.
+- **Passwords (NIST SP 800-63B):** minimum 12 characters, no composition rules, maximum
+  **72 bytes** — bcrypt silently ignores bytes beyond 72, so longer inputs are rejected
+  rather than truncated.
+- **Brute force: stated scope cut.** No API Gateway or WAF exists to rate-limit; a
+  per-account lockout lets an attacker lock victims out. bcrypt's cost is the brake;
+  recorded in the README as deliberately not done.
+- **bcrypt cost: 10 for now (OWASP floor), re-decided on the first cloud deploy.**
+  LocalStack cannot answer this: its Lambda containers run with no CPU or memory limit
+  (`NanoCpus=0`, `Memory=0`, checked 2026-09-23), while AWS scales CPU with memory (a full
+  vCPU at 1,769 MB, ~7% of one at 128 MB) — estimated ~1 s per login at cost 10, ~4 s at
+  12. If cloud login is too slow, raise `auth`'s memory only. Raising the cost later is
+  safe: bcrypt stores it inside each hash, so existing passwords keep verifying.
+- **Endpoints (`auth`):** `POST /register` (public, Employee only), `POST /login`
+  (public), `POST /refresh` (public, cookie), **`DELETE /refresh` for sign-out** (public,
+  cookie), `GET /me` (any role). Sign-out lives on `/refresh` because the cookie's
+  `Path=/api/auth/refresh` (AD-08a) means the browser sends it nowhere else — a separate
+  `/logout` could never revoke server-side.
+- **Phase A built (2026-09-23): keys and verification.** `infra/jwt.tf` (`tls_private_key`,
+  cloud-only Secrets Manager secret + version, `auth_env_vars`); `JWT_PUBLIC_KEY` in the shared
+  env map; `lambda.tf` merges signing material into `auth` only. `_shared/authz.py`
+  `authenticate()` is real: `X-Access-Token` only, `RS256` only, issuer
+  `acme-incidents-auth`, required claims `exp iat iss sub role`, `sub` must be numeric,
+  role must be known; "expired" vs "invalid" to the caller, the exception class to the log.
+  Dependencies: `PyJWT==2.10.1`, `cryptography==44.0.0` in `_shared` (every service
+  verifies), `bcrypt==4.2.1` in `auth` only. Verified: 15 authz tests including hand-built
+  `alg: none` and RS256→HS256 key-confusion tokens; widening the algorithm allow-list
+  makes both fail (uncaught `InvalidKeyError`, i.e. a 500) — the pin is load-bearing.
+  Local deploy: only `auth` has `JWT_PRIVATE_KEY`, `_migrate` only the public key, no
+  secret name locally; health 200 proves the crypto wheels load in the Lambda runtime.
+  The generated pip ignore list grew 14 → 26 names with no manual step.
+- **Security behaviour, not separate decisions:** login failure is always "invalid email
+  or password", with a dummy bcrypt check for unknown emails so timing reveals nothing;
+  token failures return `unauthenticated` with only "expired" or "invalid" as the message,
+  the precise reason logged; only `RS256` is accepted (blocks `alg: none` and
+  algorithm-confusion attacks).
+
 ### AD-08 · Browser token storage
 
 **DECIDED — refresh token in an httpOnly cookie, guarded by `SameSite`, served same-origin
