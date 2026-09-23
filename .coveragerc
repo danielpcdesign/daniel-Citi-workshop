@@ -6,6 +6,8 @@ omit =
     backend/*/*/*
     backend/_examples/*
     backend/conftest.py
+    # a pip-installed single-module dependency, not our code (same rule as .gitignore)
+    backend/*/typing_extensions.py
 
 [report]
 # service dirs have no __init__.py; without this, an untested service is silently left out of the total
