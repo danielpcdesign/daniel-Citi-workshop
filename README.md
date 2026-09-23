@@ -125,6 +125,14 @@ sudo systemctl restart postgresql
 ss -ltn | grep 5432         # expect 0.0.0.0:5432
 ```
 
+**Apply a new migration locally.** `start-dev.sh` skips Terraform when the backend is already deployed, so run the deploy directly — the `source` is not optional (see Known defects):
+
+```sh
+source ENVIRONMENT.config && ./bin/deploy-backend.sh local
+```
+
+A failing migration fails the deploy with the PostgreSQL error in Terraform's output.
+
 **Verify the backend** — through the proxy, and tail the Lambda log:
 
 ```sh
@@ -143,6 +151,7 @@ coding-workshop-participant/
 ├── backend/
 │   ├── _examples/            provided templates — copied out, never edited in place
 │   │   └── python-service/   function.py, postgres_service.py, requirements.txt
+│   ├── _migrate/             private schema-migration Lambda, no URL (AD-03); migrations/NNN_*.sql
 │   ├── auth/                 sign-in and token issue (AD-07); at M1 a DB-reachability check
 │   └── <service>/            our services — see the discovery rules below
 ├── bin/                      provided scripts — setup, start-dev, deploy, generate-env, cleanup
@@ -258,6 +267,7 @@ Found by reading the repository before writing any code. Recorded because each o
 - **`bin/proxy-server.js` (the `:3001` dev proxy) forwards only four request headers** — `accept`, `content-type`, `user-agent`, `host`. It silently dropped `X-Access-Token` and `Cookie`, so every authenticated request would have arrived anonymous, locally only. Fixed: both are now forwarded when present.
 - **`bin/proxy-server.js` answered an unknown service with `502`, never `404`.** It built the target URL *before* checking the service existed, so a missing name became the string `"undefined/..."` — always truthy — and the "Unknown endpoint" branch was unreachable. A typo in a service name looked like a dead backend. Fixed: the lookup is checked first, with `Object.hasOwn` so names like `constructor` do not resolve to `Object.prototype` members.
 - **`bin/start-dev.sh` built service dependencies for the wrong Python.** It called bare `pip`, which on the VDI belongs to Python 3.14, while Lambda runs 3.13; compiled wheels (`psycopg-binary`) then failed to import. The failure was hidden by `2>/dev/null || true`, and the success marker was written anyway, so re-running never retried. Fixed: pip now targets `--python-version 3.13 --platform manylinux2014_x86_64`, and the marker is written only on success.
+- **`bin/deploy-backend.sh local` does not load `ENVIRONMENT.config`**, which is where `TF_VAR_aws_app_code` (the participant ID) lives. `start-dev.sh` sources it first; running `deploy-backend.sh local` on its own falls back to the default app ID `abcd1234`, and Terraform renames — destroys and recreates — every local resource. Workaround: always `source ENVIRONMENT.config` before a manual local deploy. The cloud branch of the script does source it.
 - **`bin/start-dev.sh` locates `postgresql.conf` with an unprivileged `find`**, which cannot read `/etc/postgresql/<ver>/main/`, so its rebind-to-`0.0.0.0` step fails on a stock install. Done by hand once per VDI; see Environment.
 - **The repository's root README describes a team-management application.** That is generic workshop filler and not this assignment. Where it conflicts with the problem statement, the assignment wins.
 

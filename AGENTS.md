@@ -604,16 +604,26 @@ expected to use).
 **Consequences to absorb at M2**
 
 - **Local:** `start-dev.sh` skips `terraform apply` when the backend is already deployed,
-  so a new migration applies locally only after `./bin/deploy-backend.sh local`.
-- **`start-dev.sh`'s pip loop globs `backend/*/requirements.txt`, which includes
-  `_migrate/`.** The vendored packages would land there untracked, and the `.gitignore`
-  allow-list excludes `_`-prefixed dirs. Resolve when `_migrate/` is created — either
-  skip `_` dirs in the loop or extend the ignore rule.
+  so a new migration applies locally only after
+  `source ENVIRONMENT.config && ./bin/deploy-backend.sh local` — the `source` is required
+  (see `README.md` → Known defects).
+- **`start-dev.sh`'s pip loop now skips `_`-prefixed dirs** (resolved 2026-09-23).
+  `_migrate` is not hot-reloaded; Terraform's module packages it with its own pip install.
 - **AD-02:** the shared DB helper must be vendored into `_migrate/` too; the sync step
   must include it explicitly, since `_` dirs are not services.
 - **AD-01 is unchanged:** `_migrate` is infrastructure, not a sixth service.
-- **Verify at M2:** `aws_lambda_invocation` against LocalStack, and that the Terraform
-  module accepts VPC config without a Function URL.
+- **Verified locally (2026-09-23)**, with throwaway migrations since removed:
+  - `aws_lambda_invocation` runs the Lambda during `apply` on LocalStack; a good migration
+    applied once and was recorded with its checksum; a re-run applied nothing.
+  - A failing migration **fails `terraform apply`** (deploy exit `1`) with PostgreSQL's
+    error in the Terraform output; its row is not recorded, and a table it created earlier
+    in the same file was rolled back.
+  - Editing an applied file fails the deploy: `… was edited after being applied`.
+  - No Function URL (`GetFunctionUrlConfig` → `ResourceNotFoundException`), absent from
+    the proxy's endpoint map, same `POSTGRES_*` env as the services.
+- **Still unverified — cloud only:** that `_migrate` reaches Aurora through the VPC
+  (LocalStack returns no subnets for any function, services included), and that
+  `psql` from the VDI really cannot reach Aurora.
 - **Not decided here:** table designs (M2, AD-17, AD-22) and seeding the first Facility
   Admin (AD-21).
 

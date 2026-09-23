@@ -332,6 +332,8 @@ fi
 shopt -s nullglob
 for req in "$PROJECT_ROOT"/backend/*/requirements.txt; do
     svc_dir="$(dirname "$req")"
+    # _-prefixed dirs (_migrate, _examples) are not hot-reloaded services; terraform packages them itself
+    [[ "$(basename "$svc_dir")" == _* ]] && continue
     REQS_HASH=$(md5sum "$req" 2>/dev/null | cut -d' ' -f1)
     HASH_FILE="$svc_dir/.pip_installed"
     if [ "$(cat "$HASH_FILE" 2>/dev/null)" = "$REQS_HASH" ]; then
