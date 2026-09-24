@@ -7,6 +7,7 @@ import Link from '@mui/material/Link'
 import Paper from '@mui/material/Paper'
 import Typography from '@mui/material/Typography'
 import ErrorNotice from '../components/ErrorNotice.jsx'
+import HistoryTimeline from '../components/HistoryTimeline.jsx'
 import IncidentActions from '../components/IncidentActions.jsx'
 import IncidentPlate from '../components/IncidentPlate.jsx'
 import NoteThread from '../components/NoteThread.jsx'
@@ -87,6 +88,8 @@ export default function IncidentPage()
                         <Typography id="details-heading" variant="h5" component="h2" sx={{ mb: 1 }}>Details</Typography>
                         <Typography sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxWidth: '70ch' }}>{incident.description}</Typography>
                     </Paper>
+                    {/* the record of every move sits between what was reported and what was said about it */}
+                    <HistoryTimeline history={incident.history} sx={{ mb: 3 }} />
                     <NoteThread
                         incidentId={incident.id}
                         incidentStatus={incident.status}

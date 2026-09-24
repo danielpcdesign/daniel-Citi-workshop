@@ -84,6 +84,32 @@ describe('IncidentPage', () =>
         expect(screen.getByRole('button', { name: 'Resume work' })).toBeInTheDocument()
     })
 
+    it('shows the history beside the notes, newest first, and refreshes it with the detail poll', async () =>
+    {
+        vi.useFakeTimers()
+        getIncident.mockResolvedValueOnce(incidentFixture()).mockResolvedValueOnce(BLOCKED)
+        renderDetail()
+        await act(async () => undefined)
+        const history = screen.getByRole('region', { name: 'History' })
+        expect(within(history).getAllByRole('listitem')).toHaveLength(1)
+        expect(within(history).getByText('Reported')).toBeInTheDocument()
+
+        await act(async () => vi.advanceTimersByTime(DETAIL_POLL_MS))
+        const moves = within(screen.getByRole('region', { name: 'History' })).getAllByRole('listitem')
+        expect(moves).toHaveLength(4)
+        expect(moves[0]).toHaveTextContent('In progress→ to Blocked')
+        expect(within(moves[0]).getByText('Waiting for a new valve')).toBeInTheDocument()
+    })
+
+    it('leaves the history out when there is none', async () =>
+    {
+        getIncident.mockResolvedValue(incidentFixture({ history: [] }))
+        renderDetail()
+        await screen.findByText('INC-12')
+        expect(screen.queryByRole('region', { name: 'History' })).not.toBeInTheDocument()
+        expect(screen.getByRole('region', { name: 'Conversation' })).toBeInTheDocument()
+    })
+
     it('marks every step done on a closed ticket', async () =>
     {
         getIncident.mockResolvedValue(incidentFixture({
