@@ -4,10 +4,10 @@ from pydantic import BaseModel, field_validator
 
 import passwords
 import tokens
-from shared import log
+from shared import listing, log
 from shared.authz import ROLES, User
 from shared.db import get_conn
-from shared.errors import Conflict, NotFound, Unauthenticated
+from shared.errors import Conflict, NotFound, Unauthenticated, ValidationFailed
 from shared.incident_ops import unassign_all_for
 from shared.http import Request, dispatch
 from shared.router import Router
@@ -17,8 +17,8 @@ router = Router("auth")
 
 DOMAIN = "acme.inc"
 USER_COLUMNS = "id, email, full_name, role"
-# provisional until AD-13 settles pagination
-LIST_LIMIT = 50
+# AD-13 sort allow-list
+USER_SORTS = {"email": "email", "full_name": "full_name", "role": "role"}
 DEMOTION_REASON = "assignee removed from the engineer role"
 
 
@@ -147,19 +147,23 @@ def me(request: Request) -> tuple[int, dict]:
 # admins find the people they promote (AD-21)
 @router.on("GET", "/users", roles={"admin"})
 def list_users(request: Request) -> tuple[int, dict]:
-    search = (request.query.get("q") or [""])[0].strip().lower()
-    role = (request.query.get("role") or [None])[0]
-    rows = get_conn().execute(
-        f"""
-        SELECT {USER_COLUMNS} FROM users
-        WHERE (%(search)s = '' OR lower(email) LIKE %(pattern)s OR lower(full_name) LIKE %(pattern)s)
-          AND (%(role)s::text IS NULL OR role = %(role)s)
-        ORDER BY email
-        LIMIT %(limit)s
-        """,
-        {"search": search, "pattern": f"%{search}%", "role": role, "limit": LIST_LIMIT},
+    page, limit, offset = listing.paging(request.query)
+    order = listing.order_by(request.query, USER_SORTS, "email")
+    search = (listing.first(request.query, "q") or "").strip().lower()
+    role = listing.first(request.query, "role")
+    if role is not None and role not in ROLES:
+        raise ValidationFailed("invalid filters", {"role": f"must be one of {', '.join(sorted(ROLES))}"})
+    where = """(%(search)s = '' OR lower(email) LIKE %(pattern)s ESCAPE '\\' OR lower(full_name) LIKE %(pattern)s ESCAPE '\\')
+               AND (%(role)s::text IS NULL OR role = %(role)s)"""
+    # % and _ are LIKE wildcards: escaped so a search matches its literal text
+    escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    params = {"search": search, "pattern": f"%{escaped}%", "role": role, "limit": limit, "offset": offset}
+    conn = get_conn()
+    total = conn.execute(f"SELECT count(*) FROM users WHERE {where}", params).fetchone()[0]
+    rows = conn.execute(
+        f"SELECT {USER_COLUMNS} FROM users WHERE {where} ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s", params
     ).fetchall()
-    return 200, {"items": [_user_json(row) for row in rows]}
+    return 200, listing.envelope([_user_json(row) for row in rows], total, page, limit)
 
 
 def _user_id(raw: str) -> int:

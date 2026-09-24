@@ -1773,6 +1773,18 @@ The statement explicitly delegates this: "request or manage incident priority/es
   is built on it — legality stays in `workflow.py`, recording is shared. Tests: expected
   engineer moves written out by hand from AD-17 (not derived from the code), an exhaustive
   role × ownership × status-pair sweep, policy matrices; 206 total, both modules 100%.
+- **Phase B built (2026-09-23): CRUD and lists.** `_shared/listing.py` (AD-13: `paging`,
+  allow-listed `order_by` with an `id` tie-breaker for stable pages, `envelope`), used by
+  incidents and now `/users` (the 50-row cap is gone). Incidents: `POST /` (any role;
+  reporter is the caller; `extra="forbid"`, so a body naming `reporter_id` is a `400`;
+  location validated by the service, including archived), `GET /` (visibility + filters +
+  paging + triage default sort; `LIKE` wildcards in `q` escaped), `GET /{id}` (with
+  `actions`), `PUT /{id}` (per-field `editable_fields`, location edited as a unit, a new
+  building resets floor and seat), `DELETE /{id}` (admin soft delete). Health moved to
+  `/health` because `/` is the list. 258 tests, 100%. Live on LocalStack: report 201,
+  filtered list, other employee 404, reporter edit 200, reporter priority 403, no token
+  401. **Live-test residue:** the append-only history trigger rightly refused cleanup, so
+  live checks leave permanent rows in the dev database (see README → Testing).
 
 ### AD-22 · Facility hierarchy modelling
 

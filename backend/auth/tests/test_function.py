@@ -385,3 +385,23 @@ def test_persona_access_matrix(auth, migrated_schema, method, path, expected):
     statuses = tuple(call(auth, method, path.replace("{target}", str(target)), body, token=t)[0]["statusCode"]
                      for t in tokens)
     assert statuses == expected
+
+
+def test_list_users_pages_and_rejects_bad_filters(auth, admin):
+    _, token = admin
+    for i in range(3):
+        make_user("employee", f"p{i}@acme.inc")
+
+    def get(query):
+        event = {"rawPath": "/api/auth/users", "rawQueryString": query,
+                 "requestContext": {"http": {"method": "GET"}}, "headers": {"x-access-token": token}}
+        response = auth.handler(event, None)
+        return response["statusCode"], json.loads(response["body"])
+
+    status, body = get("limit=2&page=2&sort=-email")
+    assert (status, body["total"], body["page"], body["limit"]) == (200, 4, 2, 2)
+    assert [u["email"] for u in body["items"]] == ["p0@acme.inc", "boss@acme.inc"]
+    assert get("role=superuser")[1]["error"]["fields"] == {"role": "must be one of admin, employee, engineer"}
+    # a literal underscore, not a single-character wildcard
+    make_user("employee", "under_score@acme.inc")
+    assert [u["email"] for u in get("q=r_s")[1]["items"]] == ["under_score@acme.inc"]
