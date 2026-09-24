@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, StrictBool
 
-from shared import listing, log
+from shared import listing, log, roles
 from shared.db import get_conn
 from shared.errors import NotFound, ValidationFailed
 from shared.http import Request, dispatch
@@ -15,14 +15,16 @@ router = Router("engineers")
 ENGINEERS = """
     WITH engineers AS (
         SELECT u.id, u.email, u.full_name, p.is_available,
-               count(i.id) FILTER (WHERE i.status = ANY(%(active)s) AND i.deleted_at IS NULL) AS workload
+               count(i.id) FILTER (WHERE i.status = ANY(%(active)s) AND i.deleted_at IS NULL) AS workload,
+               -- every role held (v1.1), so a role change can send the full list without a second lookup
+               ARRAY(SELECT r.role FROM user_roles r WHERE r.user_id = u.id) AS granted
         FROM engineer_profiles p
         JOIN users u ON u.id = p.user_id
         LEFT JOIN incidents i ON i.assignee_id = u.id
         GROUP BY u.id, u.email, u.full_name, p.is_available
     )
 """
-COLUMNS = ("id", "email", "full_name", "is_available", "workload")
+COLUMNS = ("id", "email", "full_name", "is_available", "workload", "granted")
 # AD-13 allow-list; "workload" ascending answers "who has capacity?"
 SORTS = {"name": "full_name", "email": "email", "workload": "workload"}
 
@@ -35,7 +37,9 @@ class AvailabilityIn(BaseModel):
 
 
 def _to_json(row: tuple) -> dict:
-    return dict(zip(COLUMNS, row))
+    data = dict(zip(COLUMNS, row))
+    data["roles"] = roles.ordered(data.pop("granted"))
+    return data
 
 
 def _user_id(raw: str) -> int:

@@ -123,3 +123,12 @@ def test_employees_cannot_toggle(svc, team):
 def test_health(svc):
     event = {"rawPath": "/api/engineers/health", "requestContext": {"http": {"method": "GET"}}}
     assert json.loads(svc.handler(event, None)["body"]) == {"service": "engineers", "database": "ok"}
+
+
+def test_each_engineer_lists_every_role_held(svc, team):
+    # v1.1: an engineer who is also an admin shows both, so a demotion can keep the admin role
+    sql("INSERT INTO user_roles (user_id, role) VALUES (%s, 'admin')", (team["fred"],))
+    status, body = call(svc, team, "ada", "GET", query="sort=name")
+    roles_by_name = {e["full_name"]: e["roles"] for e in body["items"]}
+    assert status == 200
+    assert roles_by_name["Fred"] == ["employee", "engineer", "admin"] and roles_by_name["Eve"] == ["employee", "engineer"]
