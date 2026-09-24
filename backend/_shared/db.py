@@ -14,7 +14,9 @@ def conn_str() -> str:
         f"user={os.environ['POSTGRES_USER']}",
         f"password={os.environ['POSTGRES_PASS']}",
         f"dbname={os.environ['POSTGRES_NAME']}",
-        "connect_timeout=15",
+        # aurora serverless v2 pauses at 0 capacity; resuming took longer than 15 s on the first cloud deploy
+        # (2026-09-23). 25 s waits out a resume but stays under cloudfront's 30 s default origin timeout
+        "connect_timeout=25",
     ]
     # local postgres has no tls; aurora requires it
     if os.environ.get("IS_LOCAL") != "true":

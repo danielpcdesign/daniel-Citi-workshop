@@ -2008,6 +2008,28 @@ report.
 
 ---
 
+## First cloud deploy — verification (2026-09-23)
+
+Deployed to AWS (`us-east-2`), CloudFront `https://d2bwm7q2v18xxo.cloudfront.net`. The Aurora
+cluster and CloudFront distribution were pre-provisioned by the workshop (cluster created
+2026-09-22); the first plan was `61 to add, 1 to change, 0 to destroy`.
+
+| Check (source) | Result |
+|---|---|
+| Aurora not publicly reachable (AD-03) | Confirmed: `PubliclyAccessible = false` |
+| `_migrate` reaches Aurora via the VPC (AD-03) | Confirmed: same VPC, subnets, and self-referencing SG; `001_init`, `002_read_views` applied |
+| First admin seeded (AD-21) | Confirmed: `seeded first admin you@acme.inc` |
+| Aurora resume vs `connect_timeout` (AD-04) | **Failed first deploy:** capacity 0 until the first connection, then 2 ACU — after the 15 s timeout. Fixed: `connect_timeout=25` (under CloudFront's 30 s origin timeout); redeploy passed |
+| Direct Function URL (AD-08b) | `403` — origin sealed |
+| `POST`/`PUT` body hash through OAC (AD-08b) | **Confirmed required:** without `x-amz-content-sha256` → `403` signature mismatch; with it → `201`. The frontend fetch wrapper must hash every body |
+| `X-Access-Token` survives OAC signing (AD-08c, M1) | Confirmed: `/me` → `200` |
+| Refresh cookie through CloudFront (AD-08a) | Confirmed: refresh `200` |
+| `cookies` field vs `Set-Cookie` header (M3) | AWS honours **both** → two identical `Set-Cookie` headers (harmless; see follow-up) |
+| `lambda:InvokeFunction` needed beside `InvokeFunctionUrl` (AD-08b) | Not isolated — both are granted and invocation works |
+| bcrypt cost 10 at 128 MB (M3) | Login: 6.5 s cold, **1.73 s warm** — decision pending |
+| CloudWatch JSON lines (AD-16) | Clean, parseable; LocalStack's `END RequestId` concatenation is LocalStack-only |
+| `rawPath` decoding in AWS (AD-05) | Not observed; low impact (all path ids are numeric) |
+
 ## Known documentation discrepancies
 
 Do not treat the docs as internally consistent. Confirmed mismatches:

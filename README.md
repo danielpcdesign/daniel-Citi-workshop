@@ -33,7 +33,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M11 | Visual workflow | Per-incident stepper and a status-grouped board | Not started |
 | M12 | Responsive and accessible UI | Mobile and desktop, consistent interaction states | Not started |
 | M13 | Test suites | To the coverage targets in [Testing](#testing) | In progress — backend: 80 tests pass, 100% coverage, 80% gate passes (`.venv/bin/pytest`, 2026-09-23, uncommitted), now covering the AD-12 `http.py` entry wrapper and AD-16 `log.py` formatter; mutation spot-check confirms tests fail when the code they cover is broken. Frontend (Vitest/RTL) and E2E (Cypress) not started |
-| M14 | Cloud deployment | Verified working end to end on AWS, not only in LocalStack | Not started |
+| M14 | Cloud deployment | Verified working end to end on AWS, not only in LocalStack | Backend deployed and verified through CloudFront (origin sealed, auth round trip, token header, cookie, migrations, admin seed). Frontend not yet deployed. Details: AGENTS.md → First cloud deploy |
 
 **Ordering note.** M2 precedes everything because of one schema decision that cannot be retrofitted — see [The one irreversible decision](#the-one-irreversible-decision). M3 and M4 precede M5–M8 because retrofitting an identity into endpoints written without one is the single most expensive reordering available here, and the reasoning is in [Security](#security--what-is-and-is-not-enforced).
 

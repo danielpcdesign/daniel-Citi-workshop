@@ -47,3 +47,9 @@ def test_reset_survives_a_failing_close(db_env, monkeypatch):
     monkeypatch.setattr(db, "_conn", Broken())
     db.reset_conn()
     assert db._conn is None
+
+
+def test_connect_timeout_waits_out_an_aurora_resume_but_not_cloudfronts(db_env):
+    # resume took > 15 s in the cloud; cloudfront's default origin timeout is 30 s
+    timeout = int(db.conn_str().split("connect_timeout=")[1].split()[0])
+    assert 15 < timeout < 30
