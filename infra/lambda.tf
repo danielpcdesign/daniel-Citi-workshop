@@ -38,8 +38,10 @@ module "lambda" {
   use_existing_cloudwatch_log_group = false
   trigger_on_package_timestamp      = false
   create_lambda_function_url        = true
-  authorization_type                = "NONE"
-  dead_letter_target_arn            = aws_sqs_queue.this[each.key].arn
+  # origin sealing (AD-08b): in the cloud only the cloudfront distribution, signing through its OAC, may invoke
+  # the url. locally there is no cloudfront to sign, so it stays open behind the dev proxy
+  authorization_type     = local.is_cloud ? "AWS_IAM" : "NONE"
+  dead_letter_target_arn = aws_sqs_queue.this[each.key].arn
 
   cors = {
     allow_credentials = false

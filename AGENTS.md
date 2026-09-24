@@ -1064,6 +1064,22 @@ Terraform changes, all in `infra/`:
 
 No dependency cycle: Lambda → distribution → permission is a clean DAG.
 
+**Built 2026-09-23 (before the first cloud deploy):** `aws_cloudfront_origin_access_control.lambda`
+(type `lambda`, SigV4, always sign) attached to every function origin;
+`authorization_type = local.is_cloud ? "AWS_IAM" : "NONE"` — locally it stays `NONE`
+explicitly, because there is no CloudFront to sign and local behaviour must not hinge on how
+LocalStack emulates IAM; `aws_lambda_permission` per function for `lambda:InvokeFunctionUrl`
+(`function_url_auth_type = "AWS_IAM"`) **and** `lambda:InvokeFunction`, both pinned to the
+distribution ARN. `terraform validate` passes; a local plan shows no URL/OAC/permission changes.
+**To verify on the first cloud deploy:** (1) a direct call to a Function URL returns `403`;
+(2) whether `lambda:InvokeFunction` is actually required alongside `InvokeFunctionUrl`
+(included because current AWS guidance for OAC mentions it; scoped to the distribution either
+way); (3) **`POST`/`PUT` through an OAC need an `x-amz-content-sha256` header carrying the
+SHA-256 of the body** (AWS's documented constraint for Lambda OAC; Lambda does not accept
+unsigned payloads) — the frontend's fetch wrapper must compute it with `crypto.subtle.digest`,
+and manual `curl` tests of write endpoints must send it; (4) `X-Access-Token` reaches the
+handler through the signing (the M1 check).
+
 ### The collision this creates, and how it is resolved
 
 **SigV4 signing puts the signature in the `Authorization` header. Our access token was
