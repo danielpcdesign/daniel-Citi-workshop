@@ -485,8 +485,10 @@ cd "$FRONTEND_DIR"
 # Check if dependencies are installed
 if [ ! -d "node_modules" ]; then
     echo -e "  ⚠ Frontend dependencies not installed, installing..."
-    rm -f package-lock.json
-    npm install > /tmp/npm-install.log 2>&1 || {
+    # npm ci installs exactly the committed lock (and fails if it disagrees with package.json);
+    # deleting the lock first, as this used to, re-resolved versions on every fresh machine
+    if [ -f package-lock.json ]; then NPM_INSTALL="npm ci"; else NPM_INSTALL="npm install"; fi
+    $NPM_INSTALL > /tmp/npm-install.log 2>&1 || {
         echo -e "  ✗ npm install failed"
         tail -n 30 /tmp/npm-install.log | sed 's/^/    /'
         exit 1

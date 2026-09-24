@@ -202,6 +202,8 @@ app/db
 node_modules/
 npm-debug.log*
 package-lock.json*
+# the frontend's lock is tracked: a fresh VDI must install the exact tested versions
+!frontend/package-lock.json
 yarn-debug.log*
 yarn-error.log*
 
