@@ -99,7 +99,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-16 | Logging | **JSON lines from a stdlib formatter in `_shared/log.py`; one access line per request (route pattern, status, duration, ids); UUID-validated `X-Correlation-Id` echoed and logged, falling back to `request_id`; never log tokens, cookies, secrets, or bodies; no custom metrics.** |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
-| AD-19 | Dashboards | **`reports` service: `/summary` (any role, visibility-scoped), `/hotspots`, `/timings`, `/attention` (admin); SQL aggregates; `status` filter instead of a time window; time to assign (= acknowledged, since assignment is an admin's review) and time to resolve, from history; "informed" pinned for the frontend; no caching.** |
+| AD-19 | Dashboards | **`reports` service: `/summary` (any role, visibility-scoped), `/hotspots`, `/timings`, `/attention` (admin); SQL aggregates; `status` filter instead of a time window; time to assign, time to acknowledge (first `open → in_progress`), and time to resolve, all from history and measured from creation; "informed" pinned for the frontend; no caching.** |
 | AD-20 | Priority and escalation | **`Low/Medium/High/Critical`; `requested_priority` (employee, immutable) + `priority` (admin-set). Escalation = employee request an admin grants or declines, held in one `escalation_status` field on `incidents`; reason required and posted as a note; latest request only; no automatic effect; pending requests shown on the admin dashboard via polling.** |
 | AD-21 | Registration and roles | **Self-registration creates Employees only** (exact `acme.inc` domain match, server-side; no email verification). Admins promote users to Engineer (by creating the profile) or Admin. First admin seeded by `_migrate` from Terraform variables. `users.role` + one-to-one `engineer_profiles`. Demotion auto-unassigns active tickets. |
 | AD-22 | Facility hierarchy | **Three tables** (`buildings`, `floors`, `seats`); incident has required `building_id`, optional `floor_id`, optional `seat_id` (needs a floor), kept consistent by composite FKs. Soft delete via `archived_at`. No seat occupants. |
@@ -1506,10 +1506,8 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 - **Admin: any status to any other.** The escape hatch for corrections and reopening. Every
   admin move still writes a history row, so overrides are visible, not silent.
 - **Engineer: one step forward at a time, plus unblocking.** No skipping `In Progress` —
-  its timestamp records when the engineer started work, and a skip leaves the timeline with
-  a hole. *(Originally justified as the "acknowledged" metric; since 2026-09-23
-  acknowledgement is defined as assignment — see AD-19. The rule stands for a complete
-  timeline.)*
+  its timestamp is the "how quickly acknowledged" metric, and a skip leaves it empty.
+  *(Acknowledgement was briefly redefined as assignment on 2026-09-23 and reverted the same day — see AD-19.)*
   `Blocked → In Progress` is allowed because `Blocked` is a detour, not a stage (AD-18);
   without it every unblock would route through an admin. No `Blocked → Resolved`: the
   ticket returns to `In Progress` first.
@@ -1546,18 +1544,16 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
   assigned `Unassigned` incident or an unassigned `Open` one. Consequences: nothing leaves
   `Unassigned` except by assignment (this narrows the admin's any-to-any rule); an admin
   moving an incident back to `Unassigned` clears its assignee in the same transaction.
-- **Timing metrics, all from the status history:** created → *assigned = acknowledged*
-  (`Unassigned → Open`) → *resolved*. `Open → In Progress` records the engineer starting
-  work but is not a reported metric. *(Redefined 2026-09-23 under AD-19: acknowledgement
-  is assignment, because an admin must review a ticket to assign it.)*
+- **Timing metrics, all from the status history:** created → *assigned*
+  (`Unassigned → Open`) → *acknowledged* (`Open → In Progress`) → *resolved*; all three
+  are reported (AD-19). *(Acknowledgement was briefly redefined as assignment on 2026-09-23 and reverted the same day — see AD-19.)*
 - **This deviates from the problem statement's five-status workflow.** The five keep their
   names and order; `Unassigned` is prepended. Documented in `README.md` as a deliberate
   deviation: it makes the admin's triage queue a plain status filter and time-to-assign a
   plain transition.
 - **Rejected:** unassigned as a condition on `Open` (works, but the queue and the
   time-to-assign metric need a second mechanism beside the status history); assignment
-  auto-moving to `In Progress` (would have erased the engineer-start step; see AD-19 for
-  the later redefinition of acknowledgement as assignment).
+  auto-moving to `In Progress` (merges "assigned" and "acknowledged").
 - **Reassignment: admins only, routed through `Unassigned` (2026-09-23).** No direct
   engineer-to-engineer reassignment. The admin moves the incident to `Unassigned` —
   **a reason is required**, stored on the history row and posted as a note, exactly like
@@ -1569,7 +1565,7 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
   been through?" (distinct `assignee_id`s) without a separate assignment table; the
   `actor_id` alone only names the admin who acted.
 - **Consequences:** reassignment restarts the incident at `Open`, so the new engineer
-  starts it again (`Open → In Progress`); a `Blocked` incident leaves `Blocked` on the way,
+  acknowledges it again (`Open → In Progress`); a `Blocked` incident leaves `Blocked` on the way,
   its reason surviving in history and notes. An incident can be assigned more than once,
   so each timing uses the **first** occurrence (settled under AD-19).
 
@@ -1636,15 +1632,16 @@ analytical questions.
   `GET /api/engineers?sort=workload` (M7).
 - **No time window.** `hotspots` and `timings` take the same repeatable `status` filter as
   the incidents list, so old closed tickets can be excluded by status.
-- **Two timings, both reconstructed from `incident_status_history`:** **time to assign**
-  (creation row → first `unassigned → open`) and **time to resolve** (creation row → first
-  move to `resolved`), each as count, median, and average. First occurrence, because
-  reassignment can repeat a step (AD-17). **Acknowledgement is assignment:** an admin must
-  review a ticket to assign it, so the moment of assignment is the organisation
-  acknowledging it, and **time to assign answers both "acknowledged" and "assigned"** from
-  the brief. `Open → In Progress` (engineer starts work) stays in the history but is not a
-  reported metric. *(Supersedes an earlier same-day wording that listed time to
-  acknowledge as omitted.)*
+- **Three timings, all reconstructed from `incident_status_history` and all measured from
+  the creation row,** so they read as one timeline from the reporter's side: **time to
+  assign** (→ first `unassigned → open`), **time to acknowledge** (→ first
+  `open → in_progress`, the engineer's acknowledgement gate from AD-17), **time to resolve**
+  (→ first move to `resolved`). Each as count, median, and average; first occurrence,
+  because reassignment can repeat a step. Measuring acknowledgement from creation rather
+  than from assignment keeps the three comparable (medians cannot be subtracted).
+  *History of this decision, 2026-09-23:* first proposed with acknowledgement omitted, then
+  redefined as assignment ("an admin must review a ticket to assign it"), then **reverted by
+  the user to the `open → in_progress` gate** — this entry is the settled version.
 - **"How effectively are employees informed"** is pinned as a **frontend (M12)** concern —
   it reads as a UX question (how progress reaches the reporter) rather than a metric; no
   endpoint.
@@ -1652,7 +1649,7 @@ analytical questions.
 - **Built 2026-09-23 (M10).** `backend/reports` (`/summary`, `/hotspots`, `/timings`,
   `/attention`) and `_shared/visibility.py` (incidents' `policy.visibility` now imports it,
   so one rule serves both services). Timings: one pass over the history with `FILTER`
-  clauses finds each incident's creation, first assignment, first resolution;
+  clauses finds each incident's creation, first assignment, first acknowledgement, first resolution;
   `percentile_cont(0.5)` gives the median. Hotspots include archived locations (flagged),
   because history is the point. Attention takes the blocked reason from **history** and the
   escalation reason from the **reporter's** latest escalation note (the admin's decision
@@ -1862,7 +1859,7 @@ The statement explicitly delegates this: "request or manage incident priority/es
   have `role = 'engineer'` — the rule the database does not enforce, AD-21). Assigning an
   engineer with `is_available = false` is **allowed for now**; whether to refuse or warn is
   an open question for M7. 275 tests, 100%, incl. a full-lifecycle test asserting the whole
-  history timeline row by row. Live: assign / engineer starts work / engineer close 403 / blocked
+  history timeline row by row. Live: assign / acknowledge / engineer close 403 / blocked
   without reason 400 / resolve / admin close, with `actions.transitions` differing per caller.
 - **Phase D built (2026-09-23): escalation (AD-20).** `POST /{id}/escalation` `{reason}`
   (reporter only, via `policy.can_request_escalation`: not `closed`, not already `pending`)

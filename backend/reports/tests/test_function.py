@@ -108,9 +108,10 @@ def timeline(world) -> dict:
     ids["b"] = incident(world, status="open", assignee="eve")
     history(world, ids["b"], [(0, None, "unassigned", None, None), (180, "unassigned", "open", "eve", None)])
     # reassigned: the *first* assignment (100s) counts, not the second (500s)
-    ids["d"] = incident(world, status="open", assignee="eve")
+    ids["d"] = incident(world, status="in_progress", assignee="eve")
     history(world, ids["d"], [(0, None, "unassigned", None, None), (100, "unassigned", "open", "eve", None),
-                              (300, "open", "unassigned", None, "rebalancing"), (500, "unassigned", "open", "eve", None)])
+                              (300, "open", "unassigned", None, "rebalancing"), (500, "unassigned", "open", "eve", None),
+                              (560, "open", "in_progress", "eve", None)])
     ids["never"] = incident(world)
     history(world, ids["never"], [(0, None, "unassigned", None, None)])
     return ids
@@ -120,6 +121,8 @@ def test_timings_use_the_first_occurrence_and_skip_unreached_steps(svc, world, t
     _, body = call(svc, world, "ada", "/timings")
     # assign: 60, 180, 100 -> median 100, mean 113; the never-assigned ticket is not measured
     assert body["time_to_assign"] == {"count": 3, "median_seconds": 100, "average_seconds": 113}
+    # acknowledged = the engineer's first open -> in_progress, from creation: 120 and 560 -> median 340
+    assert body["time_to_acknowledge"] == {"count": 2, "median_seconds": 340, "average_seconds": 340}
     assert body["time_to_resolve"] == {"count": 1, "median_seconds": 600, "average_seconds": 600}
 
 
@@ -130,7 +133,8 @@ def test_timings_filtered_by_current_status(svc, world, timeline):
 
 def test_timings_with_no_data(svc, world):
     _, body = call(svc, world, "ada", "/timings")
-    assert body["time_to_assign"] == {"count": 0, "median_seconds": None, "average_seconds": None}
+    for timing in ("time_to_assign", "time_to_acknowledge", "time_to_resolve"):
+        assert body[timing] == {"count": 0, "median_seconds": None, "average_seconds": None}
 
 
 # --- hotspots ----------------------------------------------------------------------------------------------

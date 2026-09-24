@@ -102,8 +102,9 @@ def hotspots(request: Request) -> tuple[int, dict]:
     }
 
 
-# both timings reconstructed from the history (AD-19). acknowledgement is assignment: an admin must review a
-# ticket to assign it. first occurrence, because reassignment can repeat a step (AD-17)
+# three timings reconstructed from the history, all measured from creation so they read as one timeline (AD-19):
+# assigned, acknowledged (the engineer's first open -> in_progress, AD-17), resolved. first occurrence, because
+# reassignment can repeat a step
 @router.on("GET", "/timings", roles={"admin"})
 def timings(request: Request) -> tuple[int, dict]:
     status_clause, params = _status_filter(request)
@@ -113,6 +114,7 @@ def timings(request: Request) -> tuple[int, dict]:
             SELECT h.incident_id,
                    min(h.created_at) FILTER (WHERE h.from_status IS NULL) AS created,
                    min(h.created_at) FILTER (WHERE h.from_status = 'unassigned' AND h.to_status = 'open') AS assigned,
+                   min(h.created_at) FILTER (WHERE h.from_status = 'open' AND h.to_status = 'in_progress') AS acknowledged,
                    min(h.created_at) FILTER (WHERE h.to_status = 'resolved') AS resolved
             FROM incident_status_history h
             JOIN incidents i ON i.id = h.incident_id
@@ -121,10 +123,12 @@ def timings(request: Request) -> tuple[int, dict]:
         ),
         durations AS (
             SELECT extract(epoch FROM assigned - created) AS to_assign,
+                   extract(epoch FROM acknowledged - created) AS to_acknowledge,
                    extract(epoch FROM resolved - created) AS to_resolve
             FROM steps
         )
         SELECT count(to_assign), percentile_cont(0.5) WITHIN GROUP (ORDER BY to_assign), avg(to_assign),
+               count(to_acknowledge), percentile_cont(0.5) WITHIN GROUP (ORDER BY to_acknowledge), avg(to_acknowledge),
                count(to_resolve), percentile_cont(0.5) WITHIN GROUP (ORDER BY to_resolve), avg(to_resolve)
         FROM durations
         """,
@@ -139,7 +143,11 @@ def timings(request: Request) -> tuple[int, dict]:
             "average_seconds": None if average is None else round(float(average)),
         }
 
-    return 200, {"time_to_assign": stat(*row[:3]), "time_to_resolve": stat(*row[3:])}
+    return 200, {
+        "time_to_assign": stat(*row[0:3]),
+        "time_to_acknowledge": stat(*row[3:6]),
+        "time_to_resolve": stat(*row[6:9]),
+    }
 
 
 # which incidents are blocked or escalated, and why (a required question)
