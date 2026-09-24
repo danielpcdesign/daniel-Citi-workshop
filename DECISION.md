@@ -96,6 +96,8 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 | Integration test database | Database-backed backend tests run against the **dev database**, not a separate test database; each test gets a throwaway PostgreSQL schema (`test_<random>`) created/dropped by the `isolated_schema` fixture (`backend/conftest.py`), with code under test pointed at it via `PGOPTIONS=-c search_path=<schema>` | One PostgreSQL to stand up locally, not two; the schema-per-test isolation keeps writes out of `public` without touching production connection code | 2026-09-23 |
 | Frontend install reproducibility | `frontend/package-lock.json` tracked (`.gitignore` un-ignores only that file); `bin/start-dev.sh` runs `npm ci` when the lock exists, `npm install` otherwise | The lock was previously gitignored and deleted, so every fresh machine re-resolved dependency versions | 2026-09-24 |
 | CloudFront SPA/API routing fix | Removed the distribution-wide `custom_error_response` (404 → 200 `/index.html`); added `aws_cloudfront_function.spa_rewrite` as a viewer-request function on the S3 behavior only, rewriting extension-less non-`/api/*` paths to `/index.html` | The old rule turned API 404s into `200` HTML (broke the AD-12 envelope) and never fired for deep links anyway, since S3 behind the OAC answers a missing key with `403`; rejected: a 403→HTML rule (also breaks API 403s) and granting `ListBucket` (leaves API 404s as HTML) | 2026-09-24 |
+| M11 dashboard (`/dashboard`) | Admin and engineer only, gated by `DASHBOARD_ROLES`; `/` redirects by role, an employee visiting `/dashboard` is bounced to `/tickets`; UI gating is presentation only, the server (AD-09) is the real enforcement | Staff land where they act, employees where they report; no client-side control is trusted for access | 2026-09-24 |
+| M11 board data shape | `getBoard()` issues one `GET /api/incidents?status=<s>&limit=6` per status (six calls, one shared correlation id) instead of one paged list split client-side | A single page could be entirely one status, leaving no true per-column total for "+N more not shown" | 2026-09-24 |
 
 ## Rules settled beneath a parent decision
 
@@ -118,7 +120,14 @@ Fixed rules recorded under a parent. AD-09, AD-12, and AD-17 have since closed; 
 | AD-12 | A PostgreSQL FK violation (`23503`) reaching the error handler maps to `400`, not `500` | The service validates locations first for a precise message; the FK is only the backstop, so reaching it means a caller error the service missed | 2026-09-23 |
 | AD-05 | `router.resolve()` prefers the most specific matching pattern (fewest captured params), independent of registration order; `405` only when no matching pattern has the method, `Allow` lists methods from every matching pattern | Bug found: a `{param}` route registered before a literal route shadowed it, so a later literal route answered `405` instead of reaching its handler | 2026-09-23 |
 | AD-12 | `auth`'s public health route runs `SELECT 1` and returns only `{"service", "database"}` | The M1 handler ran `SELECT version()` and returned the full PostgreSQL version plus a `headers_received` echo on a public route — server fingerprinting | 2026-09-23 |
+| AD-18 | Admin/engineer dashboard board issues six list calls (`status=<s>&limit=6`, one shared correlation id), not one paged list | A single page could land entirely on one status, leaving no true per-column count for "+N more not shown" | 2026-09-24 |
+| AD-14 | Dashboard summary/attention/board poll every 30 s, paused when hidden; timings/hotspots load once plus a Refresh button (`usePolling` on-demand mode, `intervalMs = null`) | Timings and hotspots scan the full status history and change slowly; polling them every 30 s buys nothing | 2026-09-24 |
 
 ## Still open
 
-None — every entry in the `AGENTS.md` register is decided (2026-09-24).
+Every AD in the register is decided. One sub-question beneath an already-decided AD is open:
+
+- **Engineer dashboard board scope (beneath AD-19).** Raised 2026-09-24, building the M11
+  dashboard: should the engineer's status board show only tickets **assigned to them**
+  (`assignee_id` filter), instead of the assigned-or-reported scope it currently inherits
+  from AD-19 / Role inheritance? Not settled — awaiting the user's call.

@@ -1673,6 +1673,55 @@ An explicit MVP capability, and the most under-specified one.
   columns or filters the Engineer's board shows versus the Admin's (AD-19).
 - **Lands at:** M11.
 
+#### Built 2026-09-24 (M11) — dashboard frontend
+
+- **`/dashboard` route**, gated to `admin` and `engineer` (`DASHBOARD_ROLES`,
+  `frontend/src/utils/roles.js`). `/` redirects by role (`homePath`); staff land on
+  `/dashboard`, employees on `/tickets`; an employee who navigates to `/dashboard` directly
+  is redirected to `/tickets`. **This gating is presentation only** — the nav link and the
+  route redirect are UI convenience; the server still returns `403` on admin-only report
+  endpoints for an engineer or employee (AD-09 is what actually enforces it).
+- **Admin view:** summary plate + category/priority breakdown bars (`/summary`); "Needs
+  attention" — blocked and escalated (`/attention`); a status board with six columns in
+  workflow order (`unassigned…closed`), `blocked` shown as an error state, no
+  drag-and-drop (per this decision's condition — AD-17 enforcement alone doesn't buy drag,
+  nobody built it), cards link to `/incidents/:id`; timings (median time to assign /
+  acknowledge / resolve, with count and average, `/timings`); hotspots — top 5 buildings,
+  floors, seats (`/hotspots`).
+- **Engineer view:** summary, breakdowns, and board only — **visibility-scoped server-side**
+  (assigned to them or reported by them, the AD-19/Role-inheritance rule), not a separate
+  query. Admin-only report endpoints (`/attention`, `/timings`, `/hotspots`) are never
+  requested for an engineer, so the UI doesn't rely on the `403` it would get.
+- **Board is six list calls, not one.** `getBoard()` (`frontend/src/services/reportService.js`)
+  calls `GET /api/incidents?status=<s>&limit=6` once per status, sharing one
+  `X-Correlation-Id` (AD-16) across the six requests. Each column keeps the server's own
+  `total`, so "+N more not shown" is accurate even though only 6 cards render. **Rejected:**
+  one paged list split client-side — a single page could be entirely one status (e.g. all
+  `closed`), leaving no way to show the other five columns' true counts. `resolved` and
+  `closed` sort `-updated_at`; the other four keep the incidents list's default triage sort.
+- **Polling split (refines AD-14's "dashboards 30 s"):** summary, attention, and the board
+  poll every 30 s, paused when the tab is hidden. **Timings and hotspots are on demand
+  only** — load once, plus a Refresh button — because they scan the full status history and
+  change slowly. `usePolling` (`frontend/src/hooks/usePolling.js`) gained an on-demand mode:
+  passing `intervalMs = null` loads once and only reloads when `reload()` is called.
+- **Verified 2026-09-24:** 121 Vitest tests pass, coverage 99.7% statements / 96.2%
+  branches; lint and build clean (the pre-existing >500 kB chunk warning is unchanged); the
+  local Cypress core-journey spec passes; deployed to CloudFront, where a cloud Cypress
+  check confirmed the employee `/dashboard → /tickets` redirect and the hidden nav link.
+  **The admin dashboard itself has not yet been checked by a person in the cloud** — the
+  user is verifying it; treat that view as unverified in the cloud until confirmed.
+- **Known gaps, recorded not fixed:**
+  1. `/api/reports/hotspots` floor and seat rows carry only `parent_id`, not the parent's
+     name, so `HotspotList.jsx` prefixes the parent name only when that parent is in the
+     same response (`withParent()`). Backend fix, not yet done: return `building_name` /
+     `floor_name` from the query.
+  2. No admin all-incidents list page exists, so a board column's "+N more not shown" is
+     text, not a link.
+- **Open question, not settled here — needs the user's call:** should the engineer's board
+  show only tickets assigned to them (an `assignee_id` filter), rather than the current
+  assigned-or-reported scope it inherits from AD-19/Role inheritance? Not decided; do not
+  narrow the query without confirmation.
+
 ### AD-19 · Dashboard and reporting strategy
 
 "Basic dashboard/reporting per persona" — three different dashboards, plus the seven
