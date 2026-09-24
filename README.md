@@ -30,9 +30,9 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M8 | Ticket notes | Threaded communication on an incident | Done locally — one chronological conversation per incident; blocked, reassignment, and escalation reasons appear in it; authors edit (marked edited) and delete their own; admins moderate, even on closed tickets. 367 tests (100%), verified live |
 | M9 | Search, filter, pagination | Server-side, shared across all three persona views | Done locally — every list shares one paging / sort / envelope implementation; incidents filter by status, priority, category, location, assignee, escalation, and text or ticket number, with each persona seeing only their slice. 372 tests (100%) |
 | M10 | Dashboards and reporting | Per-persona; counts by status/priority/assignee, hotspots, MTTA/MTTR | Done locally — per-persona summary, location hotspots, time to assign, acknowledge, and resolve from history, blocked and escalated with reasons. How reporters are kept informed is left to the frontend (M12). 400 tests (100%), verified live |
-| M11 | Visual workflow | Per-incident stepper and a status-grouped board | Done locally — per-incident `WorkflowStepper` shipped with the core demo flow (commit `25632ac`); the Admin/Engineer `/dashboard` board (six status columns, workflow order, `blocked` as an error state, no drag-and-drop, cards link to `/incidents/:id`) shipped 2026-09-24 (commit `163d29e`). 121 Vitest tests pass, coverage 99.7% statements / 96.2% branches, lint and build clean, local Cypress core journey passes; deployed to CloudFront, a cloud Cypress check confirmed the employee `/dashboard` → `/tickets` redirect and the hidden nav link. The admin dashboard itself has **not** yet been checked by a person in the cloud — unverified there |
+| M11 | Visual workflow | Per-incident stepper and a status-grouped board | Done locally — per-incident `WorkflowStepper` shipped with the core demo flow (commit `25632ac`); the Admin/Engineer `/dashboard` board (six status columns, workflow order, `blocked` as an error state, no drag-and-drop, cards link to `/incidents/:id`) shipped 2026-09-24 (commit `163d29e`); a `HistoryTimeline` (newest-first status changes, actor/holder/reason/time, phones collapsed to the latest 3) shipped 2026-09-24 (commit `4b35e0d`), reading `history` from the existing detail response — see M13 for the current test count. 121 Vitest tests pass at the board commit, coverage 99.7% statements / 96.2% branches, lint and build clean, local Cypress core journey passes; deployed to CloudFront, a cloud Cypress check confirmed the employee `/dashboard` → `/tickets` redirect and the hidden nav link. The admin dashboard itself has **not** yet been checked by a person in the cloud — unverified there |
 | M12 | Responsive and accessible UI | Mobile and desktop, consistent interaction states | In progress — the dashboard and its components (summary plate, breakdown bars, attention list, status board, timings, hotspots) ship with the same responsive/loading/error conventions as the rest of the app; no dedicated cross-device pass recorded yet |
-| M13 | Test suites | To the coverage targets in [Testing](#testing) | In progress — backend: 409 tests pass, 100% coverage, 80% gate passes (`.venv/bin/pytest`, 2026-09-24); mutation spot-check confirms tests fail when the code they cover is broken. Frontend: 121 Vitest/RTL tests pass, 99.7% statements / 96.2% branches, thresholds enforced (`npm run test:coverage`, 2026-09-24). E2E: Cypress core journey passes against the local stack; in the cloud only smoke checks run (sign-in, deep-link reload, dashboard gate) |
+| M13 | Test suites | To the coverage targets in [Testing](#testing) | In progress — backend: 409 tests pass, 100% coverage, 80% gate passes (`.venv/bin/pytest`, 2026-09-24); mutation spot-check confirms tests fail when the code they cover is broken. Frontend: 129 Vitest/RTL tests pass, 99.73% statements / 96.27% branches, thresholds enforced (`npm run test:coverage`, 2026-09-24). E2E: Cypress core journey passes against the local stack; in the cloud only smoke checks run (sign-in, deep-link reload, dashboard gate) |
 | M14 | Cloud deployment | Verified working end to end on AWS, not only in LocalStack | Backend and frontend both deployed and verified through CloudFront, same domain. Backend: origin sealed, auth round trip, token header, cookie, migrations, admin seed. Frontend (`./bin/deploy-frontend.sh`, 2026-09-24): `/` and deep links (`/tickets`, `/incidents/1`, `/report`) 200 HTML, assets 200, API 404/403 JSON (AD-12 envelope), refresh cookie 200, Cypress smoke test against the cloud URL passed. The full core-journey Cypress spec was **not** run in the cloud — its fixture users exist only locally. Details: AGENTS.md → First cloud deploy / Frontend cloud deploy — verification |
 
 **Ordering note.** M2 precedes everything because of one schema decision that cannot be retrofitted — see [The one irreversible decision](#the-one-irreversible-decision). M3 and M4 precede M5–M8 because retrofitting an identity into endpoints written without one is the single most expensive reordering available here, and the reasoning is in [Security](#security--what-is-and-is-not-enforced).
@@ -118,6 +118,28 @@ source ~/.bashrc
 Deploy order: `./bin/deploy-backend.sh` first (Terraform outputs the API base URL the frontend build needs), then `./bin/deploy-frontend.sh`.
 
 `./bin/cleanup-environment.sh` destroys all deployed AWS resources and cannot be undone.
+
+### Demo data
+
+`tools/seed_demo.py` — stdlib-only Python, outside every Lambda bundle — builds a full demo
+dataset **through the public API**, so every row obeys the same business rules a real user
+would trip. It signs in as an admin (`SEED_ADMIN_EMAIL`, default `you@acme.inc`;
+`SEED_ADMIN_PASSWORD` and `SEED_PASSWORD` — the password given to every demo person — are
+prompted when unset and never stored) and creates 3 engineers and 4 employees
+(`demo.*@acme.inc`), 3 buildings with floors and seats, and 18 incidents spanning every
+status: two blocks with reasons, a reassignment through `Unassigned`, and escalations
+pending, granted, and declined. Re-running is idempotent — people, places, and incident
+titles are reused.
+
+```sh
+python3 tools/seed_demo.py                                         # local (:3001)
+python3 tools/seed_demo.py https://d2bwm7q2v18xxo.cloudfront.net   # cloud
+```
+
+Verified locally (2026-09-24): 18 incidents created; a re-run created 0; `#59`'s history
+showed the full reassignment path. **Not yet run in the cloud** — the user runs it there with
+their own admin password. All moves happen within seconds of each other, so seeded timings
+read in seconds, not the spread a manual demo would show.
 
 **One-time PostgreSQL rebind, per VDI.** The Lambdas run in Docker and reach PostgreSQL at `172.17.0.1`, so it must listen beyond loopback. `start-dev.sh` tries this itself but cannot find the config file on a stock install (see Known defects). Run once in a VDI terminal — `trust` is acceptable only because the VDI is disposable:
 
@@ -350,6 +372,7 @@ Found by reading the repository before writing any code. Recorded because each o
 - **Frontend installs were not reproducible.** `frontend/package-lock.json` was gitignored, so every fresh machine re-resolved dependency versions instead of installing the ones last verified. **Fixed (2026-09-24):** the lock file is now tracked (`.gitignore` un-ignores only it), and `bin/start-dev.sh` runs `npm ci` when it is present, `npm install` otherwise.
 - **`GET /api/reports/hotspots` floor and seat rows carry only `parent_id`, not the parent's name.** The frontend's `HotspotList.jsx` prefixes a floor or seat with its parent's name only when that parent happens to be in the same response (`withParent()`), so a floor whose building fell outside the top-5 buildings shows unprefixed. Backend fix, not yet done: return `building_name` / `floor_name` alongside `parent_id`. Found 2026-09-24, building the M11 dashboard.
 - **No admin all-incidents list page exists.** The dashboard's status board caps each column at 6 tickets and shows "+N more not shown" as plain text — there is nowhere for it to link to. Found 2026-09-24; out of MVP scope for now.
+- **The incident page shows the Grant/Decline escalation buttons even when no escalation is pending.** `IncidentActions.jsx`'s `decisions` list is filtered only by `actions.set_escalation` and the current `escalation_status`, not by whether a request is actually `pending` — an admin can see Grant/Decline on a ticket with nothing to decide. A fix was offered when found; not yet accepted. Found 2026-09-24.
 - **`infra/cloudfront.tf`'s distribution-wide `custom_error_response` broke both API errors and SPA deep links.** It rewrote every `404` to `200 /index.html`, including `/api/*` — so an API `404` came back as `200 text/html`, breaking the AD-12 error envelope — and it never actually fixed a deep link (`/tickets`, `/incidents/1`), because S3 behind the CloudFront OAC has no `ListBucket` permission and answers a missing key with `403`, not `404`. **Fixed (2026-09-24, commit `7de3cb3`):** the rule was removed and replaced with `aws_cloudfront_function.spa_rewrite` (`infra/spa-rewrite.js`, CloudFront Functions JS 2.0), a viewer-request function on the default S3 behavior only — it rewrites extension-less, non-`/api/*` paths to `/index.html`, so an unknown `/api/*` path still errors correctly. Cloud only (count-gated with the distribution); LocalStack is unaffected. Rejected alternatives: a `403 → index.html` rule (would also turn API `403`s into `200` HTML) and granting S3 `ListBucket` so the `404` rule fires (leaves API `404`s coming back as HTML).
 
 ## Testing
@@ -436,6 +459,12 @@ python3.13 -m venv .venv
 | `POST` | `/api/incidents/{id}/assignment` | admin | `{engineer_id}`; only from `unassigned`; target must be an engineer |
 | `POST` | `/api/incidents/{id}/escalation` | reporter | `{reason}` → `pending` |
 | `PUT` | `/api/incidents/{id}/escalation` | admin | `{status, reason}` — `none` / `granted` / `declined` |
+
+**Reading history outside the UI.** `GET /api/incidents/{id}` returns the full `history`
+array — this is what the frontend `HistoryTimeline` (M11/M12) renders, and it needs no
+endpoint of its own. Locally the raw rows are also queryable directly via `psql` against
+`incident_status_history`. CloudWatch logs are request logs (AD-16), not ticket movement —
+they show a call was made, not what changed.
 
 ### Facility endpoints (M6)
 

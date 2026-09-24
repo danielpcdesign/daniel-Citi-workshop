@@ -700,6 +700,22 @@ expected to use).
   apply — table designs for it were decided below, in `001_init`. See AD-21's implementation
   note for behaviour and local verification.
 
+**Demo data is seeded through the public API, not SQL (decided 2026-09-24, user's call).**
+`tools/seed_demo.py` — stdlib-only Python, outside every Lambda bundle — signs in as an admin
+and drives the same `auth`/`incidents`/`facilities`/`engineers` endpoints a real user would,
+so every demo row obeys the business rules the API enforces rather than bypassing them.
+**Rejected: a backdated SQL seed.** It would skip `workflow.py`/`policy.py` validation and,
+being outside `_migrate`, could only reach cloud Aurora by adding a second private Lambda for
+one-off data — and any direct write would appear in `schema_migrations`' history as
+production data rather than what it is. Creates 3 engineers + 4 employees (`demo.*@acme.inc`),
+3 buildings with floors and seats, and 18 incidents across every status — two blocks with
+reasons, a reassignment through `Unassigned`, and escalations pending, granted, and declined.
+Idempotent: people, places, and incident titles are reused on re-run. Verified locally
+(2026-09-24): 18 created, a re-run created 0, `#59`'s history showed the full reassignment
+path. **Not yet run in the cloud** — the user runs it there with their own admin password.
+Caveat: every move happens within seconds, so seeded timings read in seconds, not the spread
+a manual demo would show.
+
 #### Schema decisions for `001_init` (2026-09-23)
 
 - **Categories: fixed list, DB-checked** — `electrical`, `plumbing`, `hvac`, `cleaning`,
@@ -1718,8 +1734,28 @@ An explicit MVP capability, and the most under-specified one.
      `floor_name` from the query.
   2. No admin all-incidents list page exists, so a board column's "+N more not shown" is
      text, not a link.
+  3. The incident page shows the Grant/Decline escalation buttons even when no escalation
+     is pending — `IncidentActions.jsx`'s `decisions` list is filtered only by
+     `actions.set_escalation` and the current `escalation_status`, not by whether a request
+     is actually `pending`. A fix was offered when found; not yet accepted.
 - **Engineer board scope — DECIDED 2026-09-24 (user):** assigned-or-reported, the engineer's full
   server visibility; no `assignee_id` filter. The board and the summary counts beside it cover the same tickets.
+
+#### Built 2026-09-24 — history timeline
+
+`HistoryTimeline.jsx` on the incident detail view, beside the stepper: every status change,
+newest first (the stepper above reads oldest to newest, so the two are deliberately opposite
+directions). Each row shows the move, the actor, the holder when it changed, the reason, and
+absolute plus relative time. It reads `history` from the existing `GET /api/incidents/{id}`
+response (AD-19's E3 gap-closure), so it refreshes on the same 20 s poll (AD-14) and makes no
+request of its own. Phones show the latest 3 plus a "Show all" toggle. Verified: 129 Vitest
+tests pass, 99.73% statements / 96.27% branches, lint clean, a local Cypress check on a real
+incident, deployed to CloudFront.
+
+**Reading history outside the UI:** `GET /api/incidents/{id}` returns the full `history`
+array; locally the raw rows are also queryable via `psql` against
+`incident_status_history`; CloudWatch logs are request logs (AD-16), not ticket movement —
+they show a call was made, not what changed.
 
 ### AD-19 · Dashboard and reporting strategy
 
