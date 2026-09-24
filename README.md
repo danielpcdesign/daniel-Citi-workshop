@@ -26,7 +26,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M4 | Authorization | Three personas, role **and** row-level ownership; a shared enforcement *mechanism* with per-service *policy* (AD-09) | Role administration done — admins list users and change roles (promotion creates the engineer profile; demotion unassigns active tickets; the last admin cannot be removed). Persona access matrix tested for every route. Row-level ownership and transition authority land with M5 |
 | M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | Done locally — report, list (filters, paging, triage sort), detail with per-caller actions, edit, soft delete; status changes enforced by the AD-17 table with full history; assignment; escalation requests and admin decisions. 289 tests (100%), verified live on LocalStack |
 | M6 | Facilities CRUD | Building → floor → seat | Done locally — admins create, rename, and archive at every level (archive cascades; archived locations are hidden); everyone reads; duplicate names are a friendly 409. 323 tests (100%), verified live |
-| M7 | Engineer profiles + assignment | Profiles linked to accounts, ticket assignment | Not started |
+| M7 | Engineer profiles + assignment | Profiles linked to accounts, ticket assignment | Done locally — admins see every engineer's availability and live workload (sortable by capacity); engineers toggle their own availability; unavailable engineers get no new work. Assignment itself shipped in M5. 346 tests (100%), verified live |
 | M8 | Ticket notes | Threaded communication on an incident | Not started |
 | M9 | Search, filter, pagination | Server-side, shared across all three persona views | Not started |
 | M10 | Dashboards and reporting | Per-persona; counts by status/priority/assignee, hotspots, MTTA/MTTR | Not started |
@@ -435,6 +435,15 @@ Everyone signed in reads; only admins write. `{id}` is the building, floor, or s
 
 Archived locations are hidden everywhere (`404`) and cannot be restored; floors and seats cannot move to another parent — `PUT` accepts only the name.
 
+### Engineer endpoints (M7)
+
+| Method | Path | Access | Result |
+|---|---|---|---|
+| `GET` | `/api/engineers?available=&q=&sort=&page=&limit=` | admin | engineers with `is_available` and `workload` (active tickets); `sort=workload` shows who has capacity |
+| `GET` | `/api/engineers/me` | engineer | own profile and workload |
+| `GET` | `/api/engineers/{id}` | admin | one engineer |
+| `PUT` | `/api/engineers/{id}/availability` | admin, or that engineer | `{is_available}`; current tickets stay; unavailable engineers cannot be assigned new ones |
+
 ### Live checks leave permanent rows
 
 Live checks go through the deployed Lambdas, which always use the `public` schema, so they cannot use the throwaway schemas the test suite uses. Anything they create that reaches `incident_status_history` can never be deleted — the append-only trigger refuses, which is the point of it. Live checks therefore use `live.*` email addresses and `Live …` names, and those rows are left in the dev database deliberately.
@@ -457,6 +466,7 @@ Recorded so the gaps are on the record rather than implied by silence. Each is a
 - **Brute-force protection (rate limiting, account lockout).** There is no API Gateway or WAF in `infra/` to rate-limit requests, and a per-account lockout would let an attacker lock any employee out on purpose. bcrypt's deliberate slowness is the brake; login failures never reveal whether the email exists.
 - **Custom CloudWatch metrics.** Lambda's built-in metrics (invocations, errors, duration, throttles) plus Logs Insights queries over the JSON logs answer every operational question the app has. Embedded Metric Format would add metrics without new infrastructure, but nothing requires it yet (AD-16).
 - **Restoring archived locations.** Archiving is final in the MVP: a restored building could collide with a newer one of the same name, and resolving that needs rules nobody asked for. An admin can create the location again (M6).
+- **Engineer specialties.** Engineers carry availability but not the categories they handle. No required question depends on it, and matching engineers to categories would need its own rules and a second migration (M7).
 - **Seat occupants.** Seats are places an incident happens, not places people are assigned to — the brief never maps people to seats, and users carry no `seat_id`. Modelling occupancy would add a second meaning to every seat for no question the app must answer (AD-22).
 
 ## Roadmap

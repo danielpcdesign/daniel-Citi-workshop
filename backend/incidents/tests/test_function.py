@@ -25,6 +25,8 @@ def world(svc, migrated_schema) -> dict:
     for name, role in (("alice", "employee"), ("bob", "employee"), ("eve", "engineer"), ("ada", "admin")):
         ids[name] = sql("INSERT INTO users (email, password_hash, full_name, role) VALUES (%s, 'x', %s, %s) RETURNING id",
                         (f"{name}@acme.inc", name, role))[0][0]
+    # an engineer always has a profile: M4's promotion creates both in one transaction
+    sql("INSERT INTO engineer_profiles (user_id, created_by) VALUES (%s, %s)", (ids["eve"], ids["ada"]))
     ids["hq"] = sql("INSERT INTO buildings (name) VALUES ('HQ') RETURNING id")[0][0]
     ids["annex"] = sql("INSERT INTO buildings (name) VALUES ('Annex') RETURNING id")[0][0]
     ids["f1"] = sql("INSERT INTO floors (building_id, name) VALUES (%s, 'F1') RETURNING id", (ids["hq"],))[0][0]
@@ -348,6 +350,7 @@ def test_an_engineer_cannot_move_a_ticket_they_cannot_see(svc, world):
 
 def test_reassignment_goes_back_through_unassigned(svc, world):
     second = sql("INSERT INTO users (email, password_hash, full_name, role) VALUES ('fred@acme.inc', 'x', 'fred', 'engineer') RETURNING id")[0][0]
+    sql("INSERT INTO engineer_profiles (user_id, created_by) VALUES (%s, %s)", (second, world["ada"]))
     world["fred"] = second
     incident_id = report(svc, world)[1]["id"]
     give(svc, world, incident_id)
@@ -485,3 +488,20 @@ def test_pending_panel_count_comes_from_the_list(svc, world):
     report(svc, world)
     _, body = call(svc, world, "ada", "GET", query="escalation_status=pending&limit=1")
     assert (body["total"], len(body["items"])) == (3, 1)
+
+
+def test_an_unavailable_engineer_is_not_assigned_new_work(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    sql("UPDATE engineer_profiles SET is_available = false WHERE user_id = %s", (world["eve"],))
+    status, body = give(svc, world, incident_id)
+    assert (status, body["error"]["fields"]["engineer_id"]) == (400, f"engineer {world['eve']} is not available")
+    # switching availability back on is the deliberate step that allows it (M7)
+    sql("UPDATE engineer_profiles SET is_available = true WHERE user_id = %s", (world["eve"],))
+    assert give(svc, world, incident_id)[0] == 200
+
+
+def test_an_engineer_without_a_profile_is_refused(svc, world):
+    orphan = sql("INSERT INTO users (email, password_hash, full_name, role) VALUES ('orphan@acme.inc', 'x', 'o', 'engineer') RETURNING id")[0][0]
+    world["orphan"] = orphan
+    incident_id = report(svc, world)[1]["id"]
+    assert give(svc, world, incident_id, engineer="orphan")[0] == 400

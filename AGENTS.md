@@ -1807,6 +1807,31 @@ The statement explicitly delegates this: "request or manage incident priority/es
   request 200, second request 403, admin count 1, admin grant 200, reporter grant 403.
 - **M5 complete locally (2026-09-23).**
 
+
+#### M7 — engineers service (2026-09-23)
+
+- **`backend/engineers`:** `GET /` (admin: engineers with `is_available` and active workload —
+  count of `open` / `in_progress` / `blocked` tickets, computed by join at read time so it
+  cannot drift; filters `available`, `q`; sort `name`, `email`, `workload`; AD-13 paging),
+  `GET /me` (engineer: own profile), `GET /{user_id}` (admin), `PUT /{user_id}/availability`
+  (admin, or that engineer).
+- **Assigning an unavailable engineer is refused** (`400`). An admin who needs that person
+  switches availability on first — a deliberate act, not an accident.
+- **Going unavailable keeps current tickets.** Unavailable means "no new work", not "take
+  my work"; an admin reassigns through `unassigned` if needed.
+- **Only admins see the engineer list;** engineers see only themselves via `/me`.
+- **No specialties** (categories an engineer handles): no required question needs them;
+  README scope cut.
+- **Built 2026-09-23.** The workload aggregate sits in a named subquery (`WITH engineers AS
+  …`) so every column has one unambiguous name — the shared sort builder's `id` tie-breaker
+  would be ambiguous across `users` / `engineer_profiles` / `incidents` in a plain join.
+  `GET /me` beside `GET /{user_id}` relies on the AD-05 specificity fix (literal wins).
+  `incidents` assignment now refuses an unavailable engineer, and an engineer role with no
+  profile row (inconsistent data) is refused too; incidents test fixtures now create
+  profiles the way M4 promotion does. 346 tests, 100%. Live: admin list by workload 200,
+  employee 403, engineer `/me` 200, self-unavailable 200, assign refused 400, admin
+  re-enable 200, assign 200.
+
 ### AD-22 · Facility hierarchy modelling
 
 Buildings → floors → seats, with "recurring issues per building/floor/seat" as a required
