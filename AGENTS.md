@@ -1784,7 +1784,18 @@ The statement explicitly delegates this: "request or manage incident priority/es
   `/health` because `/` is the list. 258 tests, 100%. Live on LocalStack: report 201,
   filtered list, other employee 404, reporter edit 200, reporter priority 403, no token
   401. **Live-test residue:** the append-only history trigger rightly refused cleanup, so
-  live checks leave permanent rows in the dev database (see README → Testing).
+  live checks leave permanent rows in the dev database (see README → Testing). Left in
+  place by decision (2026-09-23). Live checks cannot use a throwaway schema — the deployed
+  Lambdas always connect to `public` — so they use distinct `live.*` names instead.
+- **Phase C built (2026-09-23): transitions and assignment.** `POST /{id}/transitions`
+  `{to, reason?}` (row locked; `workflow.check_transition`; `apply_transition`; moving to
+  `unassigned` releases the engineer; `blocked` / `unassigned` post a note of that kind) and
+  `POST /{id}/assignment` `{engineer_id}` (admin; only from `unassigned`; the target must
+  have `role = 'engineer'` — the rule the database does not enforce, AD-21). Assigning an
+  engineer with `is_available = false` is **allowed for now**; whether to refuse or warn is
+  an open question for M7. 275 tests, 100%, incl. a full-lifecycle test asserting the whole
+  history timeline row by row. Live: assign / acknowledge / engineer close 403 / blocked
+  without reason 400 / resolve / admin close, with `actions.transitions` differing per caller.
 
 ### AD-22 · Facility hierarchy modelling
 

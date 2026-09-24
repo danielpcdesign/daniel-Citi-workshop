@@ -9,6 +9,7 @@ from shared import listing, log
 from shared.authz import ROLES, User
 from shared.db import get_conn
 from shared.errors import Forbidden, NotFound, ValidationFailed
+from shared.incident_ops import apply_transition
 from shared.http import Request, dispatch
 from shared.router import Router
 from workflow import Incident
@@ -56,6 +57,19 @@ class IncidentIn(BaseModel):
         if not value.strip():
             raise ValueError("must not be empty")
         return value.strip()
+
+
+class TransitionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    to: str
+    reason: str | None = None
+
+
+class AssignmentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    engineer_id: int
 
 
 class IncidentEdit(BaseModel):
@@ -266,6 +280,48 @@ def edit(request: Request) -> tuple[int, dict]:
             f"UPDATE incidents SET {assignments}, updated_at = now() WHERE id = %(id)s RETURNING {COLUMNS}",
             {**changes, "id": current["id"]},
         ).fetchone()
+    return 200, _to_json(row, request.user)
+
+
+# the only way a status changes (AD-17): legality from workflow.py, recording from the shared writer
+@router.on("POST", "/{incident_id}/transitions", roles=ANYONE)
+def transition(request: Request) -> tuple[int, dict]:
+    data = TransitionIn.model_validate(request.body)
+    reason = (data.reason or "").strip() or None
+    conn = get_conn()
+    with conn.transaction():
+        # locked: two people moving the same ticket at once are applied one after the other
+        row = load(conn, request.user, request.params["incident_id"], lock=True)
+        incident = _incident(row)
+        workflow.check_transition(request.user, incident, data.to, reason)
+        # going back to unassigned releases the engineer; every other move keeps them
+        assignee = None if data.to == "unassigned" else incident.assignee_id
+        # blocked and unassigned carry a reason the requester must see (AD-17)
+        note_kind = data.to if data.to in ("blocked", "unassigned") else None
+        apply_transition(conn, incident.id, incident.status, data.to, request.user.id, assignee, reason, note_kind)
+        row = load(conn, request.user, str(incident.id))
+    return 200, _to_json(row, request.user)
+
+
+# assignment is the only way out of unassigned (AD-17); reassignment goes back through unassigned first
+@router.on("POST", "/{incident_id}/assignment", roles={"admin"})
+def assign(request: Request) -> tuple[int, dict]:
+    data = AssignmentIn.model_validate(request.body)
+    conn = get_conn()
+    with conn.transaction():
+        row = load(conn, request.user, request.params["incident_id"], lock=True)
+        incident = _incident(row)
+        if incident.status != "unassigned":
+            raise ValidationFailed(
+                "only an unassigned incident can be assigned",
+                {"incident": "move it to unassigned first, with a reason (reassignment)"},
+            )
+        # the database lets assignee_id reference any user; "engineers only" is enforced here (AD-21)
+        target = conn.execute("SELECT role FROM users WHERE id = %s", (data.engineer_id,)).fetchone()
+        if target is None or target[0] != "engineer":
+            raise ValidationFailed("invalid assignee", {"engineer_id": f"user {data.engineer_id} is not an engineer"})
+        apply_transition(conn, incident.id, "unassigned", "open", request.user.id, data.engineer_id, None)
+        row = load(conn, request.user, str(incident.id))
     return 200, _to_json(row, request.user)
 
 

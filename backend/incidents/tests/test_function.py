@@ -284,3 +284,122 @@ def test_non_admins_cannot_delete(svc, world):
 def test_health(svc, world):
     response = svc.handler({"rawPath": "/api/incidents/health", "requestContext": {"http": {"method": "GET"}}}, None)
     assert json.loads(response["body"]) == {"service": "incidents", "database": "ok"}
+
+
+# --- transitions and assignment (phase C, AD-17) ------------------------------------------------
+
+def move(svc, world, who, incident_id, to, reason=None):
+    body = {"to": to} if reason is None else {"to": to, "reason": reason}
+    return call(svc, world, who, "POST", f"/{incident_id}/transitions", body)
+
+
+def give(svc, world, incident_id, engineer="eve", who="ada"):
+    return call(svc, world, who, "POST", f"/{incident_id}/assignment", {"engineer_id": world[engineer]})
+
+
+def test_full_lifecycle_records_every_step_for_the_metrics(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    status, body = give(svc, world, incident_id)
+    assert (status, body["status"], body["assignee_id"]) == (200, "open", world["eve"])
+    assert move(svc, world, "eve", incident_id, "in_progress")[0] == 200
+    assert move(svc, world, "eve", incident_id, "blocked", "waiting for a spare part")[0] == 200
+    assert move(svc, world, "eve", incident_id, "in_progress")[0] == 200
+    assert move(svc, world, "eve", incident_id, "resolved")[0] == 200
+    status, body = move(svc, world, "ada", incident_id, "closed")
+    assert (status, body["status"]) == (200, "closed")
+    # created -> assigned -> acknowledged -> ... -> resolved -> closed, each with actor and holder
+    assert sql("SELECT from_status, to_status, actor_id, assignee_id FROM incident_status_history ORDER BY id") == [
+        (None, "unassigned", world["alice"], None),
+        ("unassigned", "open", world["ada"], world["eve"]),
+        ("open", "in_progress", world["eve"], world["eve"]),
+        ("in_progress", "blocked", world["eve"], world["eve"]),
+        ("blocked", "in_progress", world["eve"], world["eve"]),
+        ("in_progress", "resolved", world["eve"], world["eve"]),
+        ("resolved", "closed", world["ada"], world["eve"]),
+    ]
+    # the blocked reason lives twice: the record (history) and the notification (note)
+    assert sql("SELECT reason FROM incident_status_history WHERE to_status = 'blocked'") == [("waiting for a spare part",)]
+    assert sql("SELECT kind, author_id, body FROM ticket_notes") == [("blocked", world["eve"], "waiting for a spare part")]
+
+
+def test_detail_offers_exactly_the_next_moves(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    _, body = move(svc, world, "eve", incident_id, "in_progress")
+    assert body["actions"]["transitions"] == ["blocked", "resolved"]
+
+
+@pytest.mark.parametrize("who,to,status", [
+    ("eve", "resolved", 403),     # skipping in_progress
+    ("eve", "closed", 403),       # only admins close
+    ("alice", "in_progress", 403),  # the reporter sees it but changes no status
+    ("eve", "open", 400),         # already open
+    ("eve", "done", 400),         # unknown status
+])
+def test_refused_moves(svc, world, who, to, status):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    assert move(svc, world, who, incident_id, to)[0] == status
+
+
+def test_blocked_needs_a_reason(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    move(svc, world, "eve", incident_id, "in_progress")
+    status, body = move(svc, world, "eve", incident_id, "blocked", "   ")
+    assert (status, body["error"]["fields"]) == (400, {"reason": "required when moving to blocked"})
+
+
+def test_unassigned_cannot_be_moved_only_assigned(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    status, body = move(svc, world, "ada", incident_id, "open")
+    assert (status, body["error"]["message"]) == (400, "an unassigned incident leaves unassigned only by assignment")
+
+
+def test_an_engineer_cannot_move_a_ticket_they_cannot_see(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    # not assigned to eve and not reported by eve: invisible, so 404 rather than 403
+    assert move(svc, world, "eve", incident_id, "in_progress")[0] == 404
+
+
+def test_reassignment_goes_back_through_unassigned(svc, world):
+    second = sql("INSERT INTO users (email, password_hash, full_name, role) VALUES ('fred@acme.inc', 'x', 'fred', 'engineer') RETURNING id")[0][0]
+    world["fred"] = second
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    move(svc, world, "eve", incident_id, "in_progress")
+    # direct engineer-to-engineer reassignment is refused
+    assert give(svc, world, incident_id, engineer="fred")[0] == 400
+    assert move(svc, world, "ada", incident_id, "unassigned")[0] == 400           # needs a reason
+    status, body = move(svc, world, "ada", incident_id, "unassigned", "eve is on leave")
+    assert (status, body["assignee_id"]) == (200, None)
+    assert give(svc, world, incident_id, engineer="fred")[1]["assignee_id"] == second
+    # "how many hands": distinct holders across the history
+    assert sql("SELECT count(DISTINCT assignee_id) FROM incident_status_history") == [(2,)]
+    assert sql("SELECT kind, body FROM ticket_notes") == [("unassigned", "eve is on leave")]
+
+
+@pytest.mark.parametrize("target,status", [("bob", 400), ("ada", 400)])
+def test_only_engineers_can_be_assigned(svc, world, target, status):
+    incident_id = report(svc, world)[1]["id"]
+    status_code, body = give(svc, world, incident_id, engineer=target)
+    assert (status_code, body["error"]["fields"]["engineer_id"]) == (status, f"user {world[target]} is not an engineer")
+
+
+def test_assigning_an_unknown_user(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    status, _ = call(svc, world, "ada", "POST", f"/{incident_id}/assignment", {"engineer_id": 999999})
+    assert status == 400
+
+
+@pytest.mark.parametrize("who", ["alice", "eve"])
+def test_only_admins_assign(svc, world, who):
+    incident_id = report(svc, world)[1]["id"]
+    assert give(svc, world, incident_id, who=who)[0] == 403
+
+
+def test_engineer_loses_visibility_of_a_ticket_taken_from_them(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    move(svc, world, "ada", incident_id, "unassigned", "rebalancing")
+    assert call(svc, world, "eve", "GET", f"/{incident_id}")[0] == 404

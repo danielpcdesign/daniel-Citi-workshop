@@ -24,7 +24,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | In progress — `001_init` applied locally through Terraform; 18 database-constraint cases pass (`backend/_migrate/tests/constraints.sql`). First-admin seeding built and verified locally (real deploys: no-vars fails, plaintext fails, valid hash seeds, redeploy is a no-op, taken email fails); remaining = cloud apply |
 | M3 | Authentication | Registration gated to `acme.inc`, password hashing, JWT issue and verify | Done locally — register (Employees only, exact `acme.inc`), login, refresh with rotation and reuse detection, sign-out, `/me`; RS256 verification in every service. Verified by 119 tests (100%) and live through `:3001` with a cookie jar. Cloud: bcrypt timing and the cookie field still to check |
 | M4 | Authorization | Three personas, role **and** row-level ownership; a shared enforcement *mechanism* with per-service *policy* (AD-09) | Role administration done — admins list users and change roles (promotion creates the engineer profile; demotion unassigns active tickets; the last admin cannot be removed). Persona access matrix tested for every route. Row-level ownership and transition authority land with M5 |
-| M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | In progress — rules and visibility (A) and report / list / detail / edit / delete with filters, paging, and triage sort (B) done; transitions, assignment, escalation next |
+| M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | In progress — rules and visibility (A); report / list / detail / edit / delete with filters, paging, triage sort (B); status changes and assignment with full history (C). Escalation next |
 | M6 | Facilities CRUD | Building → floor → seat | Not started |
 | M7 | Engineer profiles + assignment | Profiles linked to accounts, ticket assignment | Not started |
 | M8 | Ticket notes | Threaded communication on an incident | Not started |
@@ -405,6 +405,10 @@ python3.13 -m venv .venv
 | `GET` | `/api/auth/me` | any role | `200` the caller; `401` without a valid `X-Access-Token` |
 | `GET` | `/api/auth/users?q=&role=` | admin | `200` users matching the search (at most 50 until pagination, AD-13) |
 | `PUT` | `/api/auth/users/{id}/role` | admin | `200` `{user, unassigned_incidents}`; one transaction — promotion creates the engineer profile, demotion returns active tickets to `Unassigned` with a reason; `409` for the last admin |
+
+### Live checks leave permanent rows
+
+Live checks go through the deployed Lambdas, which always use the `public` schema, so they cannot use the throwaway schemas the test suite uses. Anything they create that reaches `incident_status_history` can never be deleted — the append-only trigger refuses, which is the point of it. Live checks therefore use `live.*` email addresses and `Live …` names, and those rows are left in the dev database deliberately.
 
 ### Local gotcha: deploys fail until the first admin is configured
 
