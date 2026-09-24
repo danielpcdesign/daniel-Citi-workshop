@@ -30,8 +30,11 @@ Category = Literal["electrical", "plumbing", "hvac", "cleaning", "furniture",
                    "access_security", "network", "hardware", "software", "other"]
 Priority = Literal["low", "medium", "high", "critical"]
 
+# read from the incidents_read view (migration 002): the base columns plus names, so no extra round-trip (E1, E2)
 COLUMNS = ("id, title, description, category, status, priority, requested_priority, escalation_status, "
-           "reporter_id, assignee_id, building_id, floor_id, seat_id, created_at, updated_at")
+           "reporter_id, assignee_id, building_id, floor_id, seat_id, created_at, updated_at, "
+           "building_name, building_archived, floor_name, floor_archived, seat_name, seat_archived, "
+           "reporter_name, assignee_name")
 FIELDS = [c.strip() for c in COLUMNS.split(",")]
 
 # AD-13 sort allow-list: request keys map to fixed sql, never interpolated
@@ -127,8 +130,15 @@ def _to_json(row: tuple, user: User) -> dict:
         "requested_priority": PRIORITY_LABEL[data["requested_priority"]],
         "escalation_status": data["escalation_status"],
         "reporter_id": data["reporter_id"],
+        "reporter_name": data["reporter_name"],
         "assignee_id": data["assignee_id"],
-        "location": {"building_id": data["building_id"], "floor_id": data["floor_id"], "seat_id": data["seat_id"]},
+        "assignee_name": data["assignee_name"],
+        # names travel with ids, archived flagged: an old ticket still names its location (E1, M6 consequence)
+        "location": {
+            level: None if data[f"{level}_id"] is None else {
+                "id": data[f"{level}_id"], "name": data[f"{level}_name"], "archived": data[f"{level}_archived"]}
+            for level in ("building", "floor", "seat")
+        },
         "created_at": data["created_at"],
         "updated_at": data["updated_at"],
         # what this caller may do, so the ui shows exactly what the server allows (AD-09)
@@ -151,10 +161,11 @@ def _incident_id(raw: str) -> int:
 # loads a row the caller may see, or 404: an id the caller cannot see is indistinguishable from none (AD-09)
 def load(conn: Connection, user: User, raw_id: str, lock: bool = False) -> tuple:
     where, params = policy.visibility(user)
-    row = conn.execute(
-        f"SELECT {COLUMNS} FROM incidents WHERE id = %(id)s AND {where}{' FOR UPDATE' if lock else ''}",
-        {**params, "id": _incident_id(raw_id)},
-    ).fetchone()
+    params = {**params, "id": _incident_id(raw_id)}
+    if lock:
+        # the lock goes on the base row: postgres refuses FOR UPDATE through the view's outer joins
+        conn.execute(f"SELECT 1 FROM incidents WHERE id = %(id)s AND {where} FOR UPDATE", params)
+    row = conn.execute(f"SELECT {COLUMNS} FROM incidents_read WHERE id = %(id)s AND {where}", params).fetchone()
     if row is None:
         raise NotFound("incident not found")
     return row
@@ -194,22 +205,23 @@ def create(request: Request) -> tuple[int, dict]:
     check_location(conn, data.building_id, data.floor_id, data.seat_id)
     rank = PRIORITY_RANK[data.priority]
     with conn.transaction():
-        row = conn.execute(
-            f"""
+        incident_id = conn.execute(
+            """
             INSERT INTO incidents (title, description, category, requested_priority, priority,
                                    reporter_id, building_id, floor_id, seat_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING {COLUMNS}
+            RETURNING id
             """,
             # the reporter is always the caller, never taken from the body
             (data.title, data.description, data.category, rank, rank,
              request.user.id, data.building_id, data.floor_id, data.seat_id),
-        ).fetchone()
+        ).fetchone()[0]
         # the creation row: the start of every timing metric (schema note 4)
         conn.execute(
             "INSERT INTO incident_status_history (incident_id, from_status, to_status, actor_id) VALUES (%s, NULL, 'unassigned', %s)",
-            (row[0], request.user.id),
+            (incident_id, request.user.id),
         )
+        row = load(conn, request.user, str(incident_id))
     return 201, _to_json(row, request.user)
 
 
@@ -235,7 +247,8 @@ def _filters(query: dict[str, list[str]]) -> tuple[list[str], dict]:
             continue
         clauses.append(f"{column} = %({name})s")
         params[name] = convert(value)
-    for name in ("building_id", "floor_id", "seat_id", "assignee_id"):
+    # reporter_id: "my reports" for engineers and admins, who see more than their own (E5, reopened AD-13)
+    for name in ("building_id", "floor_id", "seat_id", "assignee_id", "reporter_id"):
         value = listing.first(query, name)
         if value is None:
             continue
@@ -272,14 +285,31 @@ def list_incidents(request: Request) -> tuple[int, dict]:
     conn = get_conn()
     total = conn.execute(f"SELECT count(*) FROM incidents WHERE {where}", params).fetchone()[0]
     rows = conn.execute(
-        f"SELECT {COLUMNS} FROM incidents WHERE {where} ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s", params
+        f"SELECT {COLUMNS} FROM incidents_read WHERE {where} ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s", params
     ).fetchall()
     return 200, listing.envelope([_to_json(row, request.user) for row in rows], total, page, limit)
 
 
 @router.on("GET", "/{incident_id}", roles=ANYONE)
 def detail(request: Request) -> tuple[int, dict]:
-    return 200, _to_json(load(get_conn(), request.user, request.params["incident_id"]), request.user)
+    conn = get_conn()
+    body = _to_json(load(conn, request.user, request.params["incident_id"]), request.user)
+    # the stepper's timestamps and the authoritative reasons, in the same response: one query, no round-trip (E3)
+    body["history"] = [
+        dict(zip(("from", "to", "at", "actor_id", "actor_name", "assignee_id", "assignee_name", "reason"), row))
+        for row in conn.execute(
+            """
+            SELECT h.from_status, h.to_status, h.created_at, h.actor_id, actor.full_name,
+                   h.assignee_id, holder.full_name, h.reason
+            FROM incident_status_history h
+            JOIN users actor ON actor.id = h.actor_id
+            LEFT JOIN users holder ON holder.id = h.assignee_id
+            WHERE h.incident_id = %s ORDER BY h.created_at, h.id
+            """,
+            (body["id"],),
+        ).fetchall()
+    ]
+    return 200, body
 
 
 @router.on("PUT", "/{incident_id}", roles=ANYONE)
@@ -306,10 +336,11 @@ def edit(request: Request) -> tuple[int, dict]:
         if "priority" in changes:
             changes["priority"] = PRIORITY_RANK[changes["priority"]]
         assignments = ", ".join(f"{column} = %({column})s" for column in changes)
-        row = conn.execute(
-            f"UPDATE incidents SET {assignments}, updated_at = now() WHERE id = %(id)s RETURNING {COLUMNS}",
+        conn.execute(
+            f"UPDATE incidents SET {assignments}, updated_at = now() WHERE id = %(id)s",
             {**changes, "id": current["id"]},
-        ).fetchone()
+        )
+        row = load(conn, request.user, str(current["id"]))
     return 200, _to_json(row, request.user)
 
 

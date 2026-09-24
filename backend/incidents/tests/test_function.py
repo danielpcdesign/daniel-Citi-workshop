@@ -63,7 +63,11 @@ def test_report_starts_unassigned_with_a_creation_row(svc, world):
     assert status == 201
     assert (body["status"], body["priority"], body["requested_priority"]) == ("unassigned", "medium", "medium")
     assert body["reporter_id"] == world["alice"]
-    assert body["location"] == {"building_id": world["hq"], "floor_id": world["f1"], "seat_id": world["s1"]}
+    assert body["location"] == {
+        "building": {"id": world["hq"], "name": "HQ", "archived": False},
+        "floor": {"id": world["f1"], "name": "F1", "archived": False},
+        "seat": {"id": world["s1"], "name": "S1", "archived": False},
+    }
     assert sql("SELECT from_status, to_status, actor_id FROM incident_status_history") == [
         (None, "unassigned", world["alice"])]
 
@@ -237,7 +241,8 @@ def test_location_edit_is_validated_and_resets_what_depends_on_it(svc, world):
     assert bad[0] == 400
     status, body = call(svc, world, "alice", "PUT", f"/{incident_id}", {"building_id": world["annex"]})
     # moving building clears floor and seat unless they are given again
-    assert (status, body["location"]) == (200, {"building_id": world["annex"], "floor_id": None, "seat_id": None})
+    assert (status, body["location"]) == (200, {
+        "building": {"id": world["annex"], "name": "Annex", "archived": False}, "floor": None, "seat": None})
 
 
 @pytest.mark.parametrize("body,status", [({}, 400), ({"reporter_id": 1}, 400), ({"title": " "}, 400)])
@@ -660,3 +665,64 @@ def test_searching_someone_elses_number_finds_nothing(svc, world):
     alices = report(svc, world, who="alice")[1]["id"]
     _, body = call(svc, world, "bob", "GET", query=f"q={alices}")
     assert body["total"] == 0
+
+
+
+# --- frontend gaps E1-E7 (read views, history, activity, reporter filter, iso dates) ----------------------
+
+def test_names_travel_with_ids(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    _, body = call(svc, world, "alice", "GET", f"/{incident_id}")
+    assert (body["reporter_name"], body["assignee_name"]) == ("alice", "eve")
+
+
+def test_an_archived_location_is_still_named(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    sql("UPDATE buildings SET archived_at = now() WHERE id = %s", (world["hq"],))
+    _, body = call(svc, world, "alice", "GET", f"/{incident_id}")
+    assert body["location"]["building"] == {"id": world["hq"], "name": "HQ", "archived": True}
+
+
+def test_detail_carries_the_history_for_the_stepper(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    move(svc, world, "eve", incident_id, "in_progress")
+    move(svc, world, "eve", incident_id, "blocked", "part on order")
+    _, body = call(svc, world, "alice", "GET", f"/{incident_id}")
+    assert [(h["from"], h["to"], h["actor_name"], h["assignee_name"], h["reason"]) for h in body["history"]] == [
+        (None, "unassigned", "alice", None, None),
+        ("unassigned", "open", "ada", "eve", None),
+        ("open", "in_progress", "eve", "eve", None),
+        ("in_progress", "blocked", "eve", "eve", "part on order"),
+    ]
+    # lists stay light: history is on the detail only
+    assert "history" not in call(svc, world, "alice", "GET")[1]["items"][0]
+
+
+def test_timestamps_are_iso_8601(svc, world):
+    _, body = report(svc, world)
+    assert "T" in body["created_at"] and " " not in body["created_at"]
+
+
+def test_a_new_note_counts_as_activity(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    sql("UPDATE incidents SET updated_at = now() - interval '1 day' WHERE id = %s", (incident_id,))
+    before = sql("SELECT updated_at FROM incidents WHERE id = %s", (incident_id,))[0][0]
+    note(svc, world, "alice", incident_id)
+    assert sql("SELECT updated_at FROM incidents WHERE id = %s", (incident_id,))[0][0] > before
+
+
+def test_notes_carry_their_authors_name_and_role(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    note(svc, world, "eve", incident_id, "on my way")
+    item = notes_of(svc, world, "alice", incident_id)[1]["items"][0]
+    assert (item["author_name"], item["author_role"]) == ("eve", "engineer")
+
+
+def test_my_reports_for_an_admin(svc, world):
+    mine = report(svc, world, who="ada")[1]["id"]
+    report(svc, world, who="alice")
+    _, body = call(svc, world, "ada", "GET", query=f"reporter_id={world['ada']}")
+    assert [i["id"] for i in body["items"]] == [mine]

@@ -116,6 +116,60 @@ ALTER TABLE public.incidents ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     CACHE 1
 );
 
+CREATE TABLE public.seats (
+    id bigint NOT NULL,
+    floor_id bigint NOT NULL,
+    label text NOT NULL,
+    archived_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT seats_label_check CHECK ((btrim(label) <> ''::text))
+);
+
+CREATE TABLE public.users (
+    id bigint NOT NULL,
+    email text NOT NULL,
+    password_hash text NOT NULL,
+    full_name text NOT NULL,
+    role text DEFAULT 'employee'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT users_email_acme_inc CHECK (((email = lower(btrim(email))) AND (email ~ '^[^@[:space:]]+@acme\.inc$'::text))),
+    CONSTRAINT users_full_name_check CHECK ((btrim(full_name) <> ''::text)),
+    CONSTRAINT users_role_check CHECK ((role = ANY (ARRAY['employee'::text, 'engineer'::text, 'admin'::text])))
+);
+
+CREATE VIEW public.incidents_read AS
+ SELECT i.id,
+    i.title,
+    i.description,
+    i.category,
+    i.status,
+    i.requested_priority,
+    i.priority,
+    i.escalation_status,
+    i.reporter_id,
+    i.assignee_id,
+    i.building_id,
+    i.floor_id,
+    i.seat_id,
+    i.created_at,
+    i.updated_at,
+    i.deleted_at,
+    i.deleted_by,
+    b.name AS building_name,
+    (b.archived_at IS NOT NULL) AS building_archived,
+    f.name AS floor_name,
+    (f.archived_at IS NOT NULL) AS floor_archived,
+    s.label AS seat_name,
+    (s.archived_at IS NOT NULL) AS seat_archived,
+    r.full_name AS reporter_name,
+    a.full_name AS assignee_name
+   FROM (((((public.incidents i
+     JOIN public.buildings b ON ((b.id = i.building_id)))
+     LEFT JOIN public.floors f ON ((f.id = i.floor_id)))
+     LEFT JOIN public.seats s ON ((s.id = i.seat_id)))
+     JOIN public.users r ON ((r.id = i.reporter_id)))
+     LEFT JOIN public.users a ON ((a.id = i.assignee_id)));
+
 CREATE TABLE public.refresh_tokens (
     id bigint NOT NULL,
     user_id bigint NOT NULL,
@@ -133,15 +187,6 @@ ALTER TABLE public.refresh_tokens ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTI
     NO MINVALUE
     NO MAXVALUE
     CACHE 1
-);
-
-CREATE TABLE public.seats (
-    id bigint NOT NULL,
-    floor_id bigint NOT NULL,
-    label text NOT NULL,
-    archived_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT seats_label_check CHECK ((btrim(label) <> ''::text))
 );
 
 ALTER TABLE public.seats ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
@@ -177,17 +222,20 @@ ALTER TABLE public.ticket_notes ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY
     CACHE 1
 );
 
-CREATE TABLE public.users (
-    id bigint NOT NULL,
-    email text NOT NULL,
-    password_hash text NOT NULL,
-    full_name text NOT NULL,
-    role text DEFAULT 'employee'::text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT users_email_acme_inc CHECK (((email = lower(btrim(email))) AND (email ~ '^[^@[:space:]]+@acme\.inc$'::text))),
-    CONSTRAINT users_full_name_check CHECK ((btrim(full_name) <> ''::text)),
-    CONSTRAINT users_role_check CHECK ((role = ANY (ARRAY['employee'::text, 'engineer'::text, 'admin'::text])))
-);
+CREATE VIEW public.ticket_notes_read AS
+ SELECT n.id,
+    n.incident_id,
+    n.author_id,
+    n.kind,
+    n.body,
+    n.created_at,
+    n.edited_at,
+    n.deleted_at,
+    n.deleted_by,
+    u.full_name AS author_name,
+    u.role AS author_role
+   FROM (public.ticket_notes n
+     JOIN public.users u ON ((u.id = n.author_id)));
 
 ALTER TABLE public.users ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME public.users_id_seq

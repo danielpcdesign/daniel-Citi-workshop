@@ -5,6 +5,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import date, datetime
 from urllib.parse import parse_qs
 
 import psycopg
@@ -78,7 +79,7 @@ def dispatch(router: Router, event: dict | None, context: object) -> dict:
             "X-Correlation-Id": log.correlation_id.get(),
             **extra_headers,
         },
-        "body": "" if body is None else json.dumps(body, default=str),
+        "body": "" if body is None else json.dumps(body, default=_json_default),
     }
     if set_cookies:
         # aws function urls set cookies from the `cookies` field; localstack ignores it and only honours a
@@ -94,6 +95,13 @@ def dispatch(router: Router, event: dict | None, context: object) -> dict:
         "user_id": user.id if user else None,
     }})
     return response
+
+
+def _json_default(value: object) -> str:
+    # iso 8601 with a "T": str(datetime) uses a space, which some browsers (historically safari) cannot parse (E7)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return str(value)
 
 
 def _correlation_id(value: str | None, fallback: str) -> str:

@@ -61,7 +61,7 @@ def summary(request: Request) -> tuple[int, dict]:
 
     total = conn.execute(f"SELECT count(*) FROM incidents WHERE {visible}", params).fetchone()[0]
     oldest = conn.execute(
-        f"""SELECT id, created_at, extract(epoch FROM now() - created_at)::bigint
+        f"""SELECT id, title, created_at, extract(epoch FROM now() - created_at)::bigint
             FROM incidents WHERE {visible} AND status <> ALL(%(finished)s)
             ORDER BY created_at, id LIMIT 1""",
         {**params, "finished": list(FINISHED)},
@@ -73,7 +73,8 @@ def summary(request: Request) -> tuple[int, dict]:
         "by_category": _counts(grouped("category"), CATEGORIES),
         "by_escalation": _counts(grouped("escalation_status"), ESCALATIONS),
         # the longest-waiting unfinished ticket: the aging signal for every persona
-        "oldest_active": None if oldest is None else {"id": oldest[0], "created_at": oldest[1], "age_seconds": oldest[2]},
+        "oldest_active": None if oldest is None else {
+            "id": oldest[0], "title": oldest[1], "created_at": oldest[2], "age_seconds": oldest[3]},
     }
 
 
@@ -157,8 +158,9 @@ def attention(request: Request) -> tuple[int, dict]:
     conn = get_conn()
     blocked = conn.execute(
         """
-        SELECT i.id, i.title, i.assignee_id, h.created_at, h.reason
+        SELECT i.id, i.title, i.assignee_id, holder.full_name, h.created_at, h.reason
         FROM incidents i
+        LEFT JOIN users holder ON holder.id = i.assignee_id
         JOIN LATERAL (
             SELECT created_at, reason FROM incident_status_history
             WHERE incident_id = i.id AND to_status = 'blocked' ORDER BY created_at DESC, id DESC LIMIT 1
@@ -184,7 +186,8 @@ def attention(request: Request) -> tuple[int, dict]:
     ).fetchall()
     return 200, {
         # the reason from history: the record, which no note deletion can erase (AD-17)
-        "blocked": [{"id": r[0], "title": r[1], "assignee_id": r[2], "blocked_since": r[3], "reason": r[4]}
+        "blocked": [{"id": r[0], "title": r[1], "assignee_id": r[2], "assignee_name": r[3],
+                     "blocked_since": r[4], "reason": r[5]}
                     for r in blocked],
         # the reporter's own words from the escalation note; null if they have since deleted it (AD-20)
         "escalated": [{"id": r[0], "title": r[1], "escalation_status": r[2], "requested_at": r[3], "reason": r[4]}

@@ -7,6 +7,8 @@ import pytest
 from _shared.db import conn_str
 
 REAL_MIGRATIONS = Path(__file__).parent.parent / "migrations"
+# derived, not hard-coded: adding a migration must not break these tests
+REAL_VERSIONS = sorted(p.stem for p in REAL_MIGRATIONS.glob("*.sql"))
 # shape-valid bcrypt string; seeding stores it, it never needs to verify a password
 HASH = "$2b$12$" + "a" * 53
 
@@ -44,7 +46,7 @@ def admin(email: str = "first@acme.inc", password_hash: str = HASH) -> dict:
 def test_real_schema_applies_from_scratch_then_is_idempotent(migrate):
     use_real_migrations(migrate)
     first = migrate.run(admin())
-    assert first["applied"] == ["001_init"]
+    assert first["applied"] == REAL_VERSIONS
     tables = {row[0] for row in query("SELECT tablename FROM pg_tables WHERE schemaname = current_schema()")}
     assert {"users", "incidents", "incident_status_history", "ticket_notes"} <= tables
     # a second run finds everything recorded and applies nothing
@@ -52,24 +54,23 @@ def test_real_schema_applies_from_scratch_then_is_idempotent(migrate):
 
 
 def test_edited_applied_migration_stops_the_run(migrate):
-    (migrate.MIGRATIONS_DIR / "001_a.sql").write_text("CREATE TABLE a (id INT);")
-    # the real schema still runs (as 002) because seeding afterwards needs the users table
+    # 000_ sorts before the real schema, which still runs because seeding afterwards needs the users table
+    (migrate.MIGRATIONS_DIR / "000_a.sql").write_text("CREATE TABLE a (id INT);")
     use_real_migrations(migrate)
-    (migrate.MIGRATIONS_DIR / "001_init.sql").rename(migrate.MIGRATIONS_DIR / "002_init.sql")
     migrate.run(admin())
-    (migrate.MIGRATIONS_DIR / "001_a.sql").write_text("CREATE TABLE a (id BIGINT);")
-    with pytest.raises(RuntimeError, match="001_a.sql was edited after being applied"):
+    (migrate.MIGRATIONS_DIR / "000_a.sql").write_text("CREATE TABLE a (id BIGINT);")
+    with pytest.raises(RuntimeError, match="000_a.sql was edited after being applied"):
         migrate.run(admin())
 
 
 def test_failing_migration_rolls_back_and_is_not_recorded(migrate):
     use_real_migrations(migrate)
-    (migrate.MIGRATIONS_DIR / "002_broken.sql").write_text(
+    (migrate.MIGRATIONS_DIR / "999_broken.sql").write_text(
         "CREATE TABLE should_not_survive (id INT);\nSELECT * FROM no_such_table;"
     )
     with pytest.raises(psycopg.errors.UndefinedTable):
         migrate.run(admin())
-    assert query("SELECT version FROM schema_migrations") == [("001_init",)]
+    assert query("SELECT version FROM schema_migrations ORDER BY version") == [(v,) for v in REAL_VERSIONS]
     assert query("SELECT to_regclass('should_not_survive')") == [(None,)]
 
 
@@ -129,4 +130,4 @@ def test_http_shaped_event_is_refused_without_touching_the_database(load_service
 def test_handler_passes_the_bootstrap_admin_through(migrate):
     use_real_migrations(migrate)
     result = migrate.handler({"action": "migrate", "bootstrap_admin": admin()})
-    assert result == {"applied": ["001_init"], "admin": "seeded"}
+    assert result == {"applied": REAL_VERSIONS, "admin": "seeded"}

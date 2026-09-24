@@ -9,7 +9,8 @@ from shared.errors import Forbidden, NotFound
 from shared.http import Request
 from shared.router import Router
 
-COLUMNS = "id, incident_id, author_id, kind, body, created_at, edited_at, deleted_at, deleted_by"
+# read from the ticket_notes_read view (migration 002): the note plus who wrote it (E2)
+COLUMNS = "id, incident_id, author_id, author_name, author_role, kind, body, created_at, edited_at, deleted_at, deleted_by"
 FIELDS = [c.strip() for c in COLUMNS.split(",")]
 MAX_BODY = 5000
 # a conversation reads oldest first (AD-01: one chronological thread)
@@ -49,11 +50,16 @@ def _note_id(raw: str) -> int:
 def register(router: Router, load: Callable) -> None:
     anyone = set(ROLES)
 
+    def read(conn, note_id: int) -> tuple:
+        return conn.execute(f"SELECT {COLUMNS} FROM ticket_notes_read WHERE id = %s", (note_id,)).fetchone()
+
     def load_note(conn, incident_id: int, raw_note_id: str) -> dict:
-        row = conn.execute(
-            f"SELECT {COLUMNS} FROM ticket_notes WHERE id = %s AND incident_id = %s FOR UPDATE",
+        # lock the base row, then read the named view (the view's join is not the thing to lock)
+        locked = conn.execute(
+            "SELECT id FROM ticket_notes WHERE id = %s AND incident_id = %s FOR UPDATE",
             (_note_id(raw_note_id), incident_id),
         ).fetchone()
+        row = read(conn, locked[0]) if locked else None
         # a deleted note can be seen as a placeholder but not changed again
         if row is None or row[FIELDS.index("deleted_at")] is not None:
             raise NotFound("note not found")
@@ -67,7 +73,7 @@ def register(router: Router, load: Callable) -> None:
         order = listing.order_by(request.query, SORTS, "created_at")
         total = conn.execute("SELECT count(*) FROM ticket_notes WHERE incident_id = %s", (incident_id,)).fetchone()[0]
         rows = conn.execute(
-            f"SELECT {COLUMNS} FROM ticket_notes WHERE incident_id = %s ORDER BY {order} LIMIT %s OFFSET %s",
+            f"SELECT {COLUMNS} FROM ticket_notes_read WHERE incident_id = %s ORDER BY {order} LIMIT %s OFFSET %s",
             (incident_id, limit, offset),
         ).fetchall()
         return 200, listing.envelope([_to_json(row) for row in rows], total, page, limit)
@@ -82,10 +88,13 @@ def register(router: Router, load: Callable) -> None:
             if incident.status == "closed":
                 raise Forbidden("a closed incident is read-only")
             # the api only ever writes comments; the other kinds come from transitions and escalation
-            row = conn.execute(
-                f"INSERT INTO ticket_notes (incident_id, author_id, kind, body) VALUES (%s, %s, 'comment', %s) RETURNING {COLUMNS}",
+            note_id = conn.execute(
+                "INSERT INTO ticket_notes (incident_id, author_id, kind, body) VALUES (%s, %s, 'comment', %s) RETURNING id",
                 (incident.id, request.user.id, body),
-            ).fetchone()
+            ).fetchone()[0]
+            # a reply is activity on the ticket: "last updated" and sort=-updated_at must see it (E4)
+            conn.execute("UPDATE incidents SET updated_at = now() WHERE id = %s", (incident.id,))
+            row = read(conn, note_id)
         return 201, _to_json(row)
 
     @router.on("PUT", "/{incident_id}/notes/{note_id}", roles=anyone)
@@ -101,10 +110,8 @@ def register(router: Router, load: Callable) -> None:
             if incident.status == "closed":
                 raise Forbidden("a closed incident is read-only")
             # edited_at is returned, so a rewrite after replies is visible (M8)
-            row = conn.execute(
-                f"UPDATE ticket_notes SET body = %s, edited_at = now() WHERE id = %s RETURNING {COLUMNS}",
-                (body, note["id"]),
-            ).fetchone()
+            conn.execute("UPDATE ticket_notes SET body = %s, edited_at = now() WHERE id = %s", (body, note["id"]))
+            row = read(conn, note["id"])
         return 200, _to_json(row)
 
     @router.on("DELETE", "/{incident_id}/notes/{note_id}", roles=anyone)

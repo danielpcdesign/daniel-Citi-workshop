@@ -280,3 +280,20 @@ def test_not_found_raised_by_a_handler_uses_its_message(monkeypatch):
 
     status, body, _ = call(r, "GET", "/42")
     assert (status, body["error"]["message"]) == (404, "incident 42 not found")
+
+
+def test_non_json_values_are_serialised(monkeypatch):
+    from datetime import date, datetime, timezone
+    from decimal import Decimal
+
+    r = Router("x")
+    family = uuid.uuid4()
+
+    @r.on("GET", "/", public=True)
+    def values(request):
+        return 200, {"at": datetime(2026, 9, 23, 9, 30, tzinfo=timezone.utc), "on": date(2026, 9, 23),
+                     "family": family, "cost": Decimal("1.50")}
+
+    status, body, _ = call(r, "GET", "/")
+    # iso 8601 with a "T" (E7); anything else non-json falls back to its string form
+    assert body == {"at": "2026-09-23T09:30:00+00:00", "on": "2026-09-23", "family": str(family), "cost": "1.50"}

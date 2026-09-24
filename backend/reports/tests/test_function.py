@@ -90,6 +90,7 @@ def test_summary_has_every_bucket_and_the_oldest_active_ticket(svc, world):
     assert body["by_escalation"] == {"none": 3, "pending": 0, "granted": 0, "declined": 0}
     # the closed ticket is older but finished: the oldest *active* one is reported
     assert body["oldest_active"]["id"] == old and body["oldest_active"]["age_seconds"] > 0
+    assert body["oldest_active"]["title"] == "t"
 
 
 def test_summary_with_nothing_visible(svc, world):
@@ -171,7 +172,7 @@ def test_blocked_incidents_carry_the_latest_reason_from_history(svc, world):
                              (40, "blocked", "in_progress", "eve", None),
                              (50, "in_progress", "blocked", "eve", "part on order")])
     _, body = call(svc, world, "ada", "/attention")
-    assert [(b["id"], b["reason"]) for b in body["blocked"]] == [(blocked, "part on order")]
+    assert [(b["id"], b["assignee_name"], b["reason"]) for b in body["blocked"]] == [(blocked, "eve", "part on order")]
 
 
 def test_escalations_carry_the_reporters_reason(svc, world):

@@ -128,15 +128,19 @@ ss -ltn | grep 5432         # expect 0.0.0.0:5432
 **First admin (one-time).** Any deploy — local or cloud — against a database with no admin **fails** until these are set. Deliberate: no admin means nobody could ever promote anyone, so `_migrate` refuses to proceed silently instead of shipping an unrecoverable database (AD-21). Generate the hash on the VDI (`python3.13` carries `bcrypt` 3.2.0):
 
 ```sh
-python3.13 -c 'import bcrypt, getpass; print(bcrypt.hashpw(getpass.getpass().encode(), bcrypt.gensalt(12)).decode())'
+HASH=$(python3.13 -c 'import bcrypt, getpass; print(bcrypt.hashpw(getpass.getpass("Admin password: ").encode(), bcrypt.gensalt(10)).decode())')
 ```
 
-Add the result to `~/.bashrc` — not `ENVIRONMENT.config`, which `setup-participant.sh` regenerates — with **single** quotes; the hash contains `$`, which double quotes would expand:
+Cost 10 matches the `auth` service (`passwords.ROUNDS`); a higher cost still verifies — bcrypt stores it in the hash — but makes this admin's login slower on a 128 MB Lambda.
+
+Add both lines to `~/.bashrc` — not `ENVIRONMENT.config`, which `setup-participant.sh` regenerates — **above** Ubuntu's `case $- in … *) return;; esac` guard near the top: anything below it is skipped by non-interactive shells, so scripts and tools would never see the variables. `printf` with `'%s'` writes the hash in single quotes, which stops the shell expanding its `$` characters:
 
 ```sh
-export TF_VAR_bootstrap_admin_email='you@acme.inc'
-export TF_VAR_bootstrap_admin_password_hash='$2b$12$...'
+printf "export TF_VAR_bootstrap_admin_email='%s'\n" "admin@acme.inc"
+printf "export TF_VAR_bootstrap_admin_password_hash='%s'\n" "$HASH"
 ```
+
+Paste those two printed lines above the guard (or append and move them), then check from a non-interactive shell: `bash -c 'source ~/.bashrc; echo ${TF_VAR_bootstrap_admin_password_hash:0:7}'` must print `$2b$10$`.
 
 Required before the first cloud deploy.
 
@@ -334,6 +338,7 @@ Found by reading the repository before writing any code. Recorded because each o
 - **`bin/start-dev.sh` built service dependencies for the wrong Python.** It called bare `pip`, which on the VDI belongs to Python 3.14, while Lambda runs 3.13; compiled wheels (`psycopg-binary`) then failed to import. The failure was hidden by `2>/dev/null || true`, and the success marker was written anyway, so re-running never retried. Fixed: pip now targets `--python-version 3.13 --platform manylinux2014_x86_64`, and the marker is written only on success.
 - **`bin/deploy-backend.sh local` does not load `ENVIRONMENT.config`**, which is where `TF_VAR_aws_app_code` (the participant ID) lives. `start-dev.sh` sources it first; running `deploy-backend.sh local` on its own falls back to the default app ID `abcd1234`, and Terraform renames — destroys and recreates — every local resource. Workaround: always `source ENVIRONMENT.config` before a manual local deploy. The cloud branch of the script does source it.
 - **`bin/start-dev.sh` locates `postgresql.conf` with an unprivileged `find`**, which cannot read `/etc/postgresql/<ver>/main/`, so its rebind-to-`0.0.0.0` step fails on a stock install. Done by hand once per VDI; see Environment.
+- **`frontend/eslint.config.js` imports `eslint-plugin-react-hooks` and `eslint-plugin-react-refresh`, but `package.json` installed neither**, so `npm run lint` crashed with a module-resolution error before linting anything. Fixed: both added as dev dependencies; lint passes.
 - **The repository's root README describes a team-management application.** That is generic workshop filler and not this assignment. Where it conflicts with the problem statement, the assignment wins.
 
 ## Testing
@@ -412,8 +417,8 @@ python3.13 -m venv .venv
 | Method | Path | Access | Result |
 |---|---|---|---|
 | `POST` | `/api/incidents` | any role | `201`; starts `unassigned`; the reporter is always the caller |
-| `GET` | `/api/incidents?status=&priority=&category=&building_id=&floor_id=&seat_id=&assignee_id=&escalation_status=&q=&sort=&page=&limit=` | any role | `200` `{items, total, page, limit}` of what the caller may see; default order highest priority, then oldest |
-| `GET` | `/api/incidents/{id}` | any role | `200` with `actions` (what the caller may do); `404` if not visible |
+| `GET` | `/api/incidents?status=&priority=&category=&building_id=&floor_id=&seat_id=&assignee_id=&reporter_id=&escalation_status=&q=&sort=&page=&limit=` | any role | `200` `{items, total, page, limit}` of what the caller may see; default order highest priority, then oldest. Each item carries `reporter_name`, `assignee_name`, and a named `location` (archived places flagged) |
+| `GET` | `/api/incidents/{id}` | any role | `200` with `actions` (what the caller may do) and `history` (every status change: when, who, holder, reason — the stepper's timestamps); `404` if not visible |
 | `PUT` | `/api/incidents/{id}` | per field | reporter while `unassigned`; admin any time; `priority` admin only |
 | `DELETE` | `/api/incidents/{id}` | admin | `204` soft delete |
 | `POST` | `/api/incidents/{id}/transitions` | per AD-17 | `{to, reason?}`; `403` if not permitted, `400` if invalid for anyone |

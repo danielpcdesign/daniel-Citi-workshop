@@ -253,7 +253,7 @@ ESLint config at `frontend/eslint.config.js` — keep it clean.
 prefixes into `.env.local`:
 
 ```
-VITE_API_URL          # api_base_url, or http://localhost:3001 locally
+VITE_API_URL          # api_base_url in the cloud; "" under LocalStack (infra/output.tf) — corrected 2026-09-23
 VITE_API_ENDPOINTS    # JSON map from Terraform output api_endpoints
 VITE_LAMBDA_URLS      # JSON map service -> Lambda Function URL
 ```
@@ -1393,7 +1393,9 @@ A required feature with no specified design.
   lists, engineers, users) runs on `_shared/listing.py`; "shared across all three persona
   views" is the one incidents list, with personas as filter presets over SQL visibility.
   **Added:** a purely numeric `q` (optionally `#42`) also matches the incident id, on top
-  of the text search, under the same visibility. **Skipped by decision:** date-range
+  of the text search, under the same visibility. **Reopened 2026-09-23:** a `reporter_id`
+  filter was added after all (frontend gap E5) — roles inherit employee capabilities, so an
+  engineer's or admin's "My reports" page needs it. **Skipped by decision:** date-range
   filters (not deferred — a new decision if AD-19 needs them) and a `reporter_id` filter
   (nothing asks for it). **Scope cut:** `q` uses `ILIKE` without an index — a full scan,
   fine at workshop scale; `pg_trgm` trigram indexes are the upgrade path.
@@ -1631,6 +1633,29 @@ analytical questions.
   in PostgreSQL is far cheaper than shipping every incident to the browser to count, and the
   recurring-issue and MTTA/MTTR questions are genuinely SQL problems.
 - **Depends on:** AD-17 (timing metrics need the history table).
+
+#### Frontend gaps closed before the first cloud deploy (2026-09-23)
+
+Found by the frontend agent's phase-1 plan; each closed with the smallest backend change.
+- **E1 / E2 — names:** migration `002_read_views.sql` adds `incidents_read` (location names
+  with archived flags, reporter and assignee names) and `ticket_notes_read` (author name and
+  role). Reads use the views; writes stay on the base tables; row locks are taken on the base
+  row first, because PostgreSQL refuses `FOR UPDATE` through the view's outer joins. A view's
+  columns are fixed at creation — a migration that adds a column to `incidents` or
+  `ticket_notes` must recreate the view. Incident JSON: `reporter_name`, `assignee_name`,
+  `location: {building, floor, seat}` each `{id, name, archived}` or `null`. Reports:
+  `assignee_name` in `/attention`.
+- **E3 — history:** `GET /api/incidents/{id}` embeds `history` (from, to, at, actor and
+  holder ids and names, reason). Detail only — lists stay light.
+- **E4 — activity:** adding a note bumps the incident's `updated_at` in the same transaction.
+- **E5 — `reporter_id` filter:** added (reopens part of AD-13's M9 audit, by the user's
+  instruction to fix the flagged issues).
+- **E6:** `/summary.oldest_active` carries `title`.
+- **E7 — ISO 8601:** the wrapper serialises datetimes with `.isoformat()` (a `T`, not a
+  space), which every browser parses; other non-JSON values fall back to `str`.
+- **E8, E9:** doc and scaffold fixes (VITE_API_URL is empty locally; the two ESLint plugins).
+408 tests, 100%. The migrate tests now derive the real migration list instead of
+hard-coding `001_init`.
 
 #### DECIDED — a read-only `reports` service, aggregated in SQL (2026-09-23)
 
