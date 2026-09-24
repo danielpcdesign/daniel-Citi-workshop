@@ -95,6 +95,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-09 | RBAC enforcement | **Role as a JWT claim; every route declares `roles` or `public` at registration or the service fails to start; ownership filtered in SQL for lists and checked by per-service policy for single rows; `404` for unseen, `403` for seen-but-forbidden; frontend takes permitted actions from the API.** |
 | AD-11 | Test stack | **pytest + `pytest-cov` (backend), Vitest + React Testing Library (frontend), Cypress (E2E).** Coverage thresholds enforced in tool config, so a run below target fails. |
 | AD-12 | Errors and validation | **Envelope `{error: {code, message, fields?, request_id}}` everywhere; fixed code table (400/401/403/404/405/409/500); `500` never leaks detail; Pydantic v2 for bodies; one `_shared/http.py` entry wrapper maps every exception.** |
+| AD-13 | Lists | **Server-side SQL filters (incidents: status, priority, category, location, assignee, escalation, `q`); `page`/`limit` (20, max 100) with `{items, total, page, limit}`; allow-listed `sort`, default priority desc then oldest first.** |
 | AD-16 | Logging | **JSON lines from a stdlib formatter in `_shared/log.py`; one access line per request (route pattern, status, duration, ids); UUID-validated `X-Correlation-Id` echoed and logged, falling back to `request_id`; never log tokens, cookies, secrets, or bodies; no custom metrics.** |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
@@ -359,7 +360,7 @@ but **none is settled until confirmed** — record the outcome here and in the R
 | AD-10 | Frontend dependency set | OPEN |
 | AD-11 | Test stack | **DECIDED — pytest, Vitest + RTL, Cypress; enforced thresholds** |
 | AD-12 | Error envelope and validation approach | **DECIDED — one envelope, fixed codes, Pydantic v2, single wrapper** |
-| AD-13 | Search, filter, and pagination design | OPEN |
+| AD-13 | Search, filter, and pagination design | **DECIDED — server-side filters, page/limit, allow-listed sort** |
 | AD-14 | Real-time and async scope | OPEN |
 | AD-15 | PWA and AI-integration scope | OPEN |
 | AD-16 | Observability and structured logging | **DECIDED — JSON lines, access log, correlation id** |
@@ -1127,7 +1128,8 @@ no gain.
   at import time. Closed by default — a forgotten check is a startup failure, not a
   silent hole (the "verified in some handlers but not others" failure AD-07 rules out).
 - **Ownership is service policy, never generic.** Lists filter in SQL by role (employee
-  `WHERE reporter_id = me`, engineer `WHERE assignee_id = me`, admin unfiltered) — never
+  `WHERE reporter_id = me`, engineer `WHERE reporter_id = me OR assignee_id = me` — *amended
+  2026-09-23, see "Roles inherit employee capabilities"* — admin unfiltered) — never
   fetch-all-then-filter. A single row is loaded, then checked by the service's own policy
   module (e.g. `incidents/policy.py: can_view(user, incident)`). Notes inherit the parent
   incident's check (AD-01).
@@ -1150,6 +1152,16 @@ no gain.
   no way yet to become an authenticated user. `backend/_shared/router.py`'s `add()` still
   enforces the registration-time rule (`roles={...}` xor `public=True`, roles must be a known
   member of `ROLES` or `ValueError` at import time).
+
+#### Roles inherit employee capabilities (2026-09-23)
+
+The user's model: **employee is the base role; engineer and admin are employees too.**
+The data model is unchanged (one `users.role` value), but every capability an employee
+has, the other roles have as well — anyone signed in can report an incident, sees the
+incidents they reported, may edit their own report while it is `unassigned`, and may
+request escalation of it. Consequences: an engineer sees incidents **reported by or
+assigned to** them (a union, not assigned-only); employee-level routes declare all three
+roles. Admins see everything regardless.
 
 ### AD-10 · Frontend dependency set
 
@@ -1331,6 +1343,22 @@ A required feature with no specified design.
 - **Recommendation:** server-side filtering with documented params. Incident volume plus
   per-persona list views makes client-side filtering untenable, and filtering is what the
   Employee, Admin, and Engineer views all differ by.
+
+#### DECIDED — filtered, paged, sorted lists on the server (2026-09-23)
+
+- **Server-side filtering in SQL**, on top of the AD-09 visibility filter. Incident
+  params: `status` (repeatable), `priority`, `category`, `building_id`, `floor_id`,
+  `seat_id`, `assignee_id`, `escalation_status`, `q` (case-insensitive substring of title
+  or description). Unknown params are ignored; invalid values are `400` with `fields`.
+- **Page-number pagination:** `page` (from 1) and `limit` (default 20, maximum 100).
+  Response envelope for every list: `{items, total, page, limit}`, so the UI can show
+  "page 2 of 7". Rejected: cursor pagination — it only pays off at data volumes this app
+  will not reach, and it cannot jump to a page.
+- **Sorting:** `sort` from an allow-list (never interpolated from the request). Default
+  for incidents: **priority descending, then oldest first** — the most urgent,
+  longest-waiting ticket tops a triage list.
+- **Applies to every list endpoint**, including `GET /api/auth/users`, which drops its
+  provisional 50-row cap.
 
 ### AD-14 · Real-time and async scope
 
@@ -1724,6 +1752,27 @@ The statement explicitly delegates this: "request or manage incident priority/es
   over every `auth` route × {anonymous, employee, engineer, admin}; live through `:3001` —
   employee `403` on `/users`, admin search `200`, promotion `200` creates the profile,
   sole-admin self-demotion `409`.
+
+#### M5 scope (2026-09-23)
+
+- **Reporting:** any signed-in user (roles inherit employee capabilities); the reporter is
+  always the caller, never taken from the body.
+- **Editing fields (`PUT /incidents/{id}`):** the reporter may edit title, description,
+  category, and location only while `unassigned`; admins may edit them any time;
+  `priority` is admin-only (AD-20); engineers change status, never fields.
+- **M5 includes assignment and escalation.** `unassigned → open` happens only through
+  assignment, so the workflow cannot be tested without it; escalation's field lives on
+  `incidents`. M7 keeps engineer profiles and availability.
+- **Phase A built (2026-09-23): the rules as pure code.** `backend/incidents/workflow.py`
+  (AD-17 transition table, `allowed_transitions`, `check_transition` with a distinct
+  error per refusal: unknown status / same status / unassigned leaves only by assignment
+  → `400`; not permitted → `403`; missing reason → `400` with `fields`) and
+  `backend/incidents/policy.py` (AD-09 SQL visibility with the reported-or-assigned union,
+  `can_view`, `editable_fields`, `can_request_escalation`, `actions`). `_shared/incident_ops`
+  refactored so `apply_transition` is the single writer of a status change and `unassign`
+  is built on it — legality stays in `workflow.py`, recording is shared. Tests: expected
+  engineer moves written out by hand from AD-17 (not derived from the code), an exhaustive
+  role × ownership × status-pair sweep, policy matrices; 206 total, both modules 100%.
 
 ### AD-22 · Facility hierarchy modelling
 

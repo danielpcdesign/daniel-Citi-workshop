@@ -28,6 +28,7 @@ in commit `af53415`; a date means it was settled in a working session on that da
 | AD-09 | RBAC enforcement | Role as JWT claim; routes declare `roles`/`public` or startup fails; lists filtered in SQL, single rows checked by service `policy.py`; `404` unseen / `403` seen-but-forbidden; UI gets permitted actions from the API | Closed by default; no fetch-then-filter leaks; sequential ids not confirmable by `403`; one copy of the rules | 2026-09-23 |
 | AD-11 | Test stack | pytest + `pytest-cov`; Vitest + RTL; Cypress; thresholds enforced in tool config | Vitest is native to Vite (Jest needs ESM config); enforced targets fail the run instead of being ignored | 2026-09-23 |
 | AD-12 | Errors and validation | One envelope `{code, message, fields?, request_id}`; codes `bad_request`/`validation_failed` 400, `unauthenticated` 401, `forbidden` 403, `not_found` 404, `method_not_allowed` 405, `conflict` 409, `internal` 500; Pydantic v2; single `_shared/http.py` wrapper | Frontend branches on stable codes and shows field errors in place; no leaked internals; validation is where hand-rolled code breaks | 2026-09-23 |
+| AD-13 | Search, filter, pagination | Server-side SQL filters; `page`/`limit` (20, max 100); `{items, total, page, limit}`; allow-listed `sort`, default priority desc then oldest | Every persona's view differs by filter; page numbers let the UI jump; allow-list keeps sort out of SQL injection | 2026-09-23 |
 | AD-16 | Logging | JSON lines (`_shared/log.py`); one access line per request by the wrapper; UUID `X-Correlation-Id` logged and echoed; levels INFO/WARNING/ERROR, DEBUG via `LOG_LEVEL`; no secrets or bodies; no custom metrics | Queryable logs in Logs Insights; one user action traceable across calls; identical local and cloud behaviour | 2026-09-23 |
 | AD-17 | Incident state machine | Admin any→any; engineer (assigned only) `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`; employee none; only admins close | No skip keeps the acknowledged timestamp; unblock avoids admin bottleneck; no review state, so admin closing is the confirmation | 2026-09-23 |
 | AD-18 | Visual workflow | MUI `Stepper` per incident + status-grouped board on Admin/Engineer dashboard | Stepper answers the requester, board answers the dispatcher; drag only once AD-17 is enforced server-side | 2026-09-23 |
@@ -76,6 +77,8 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 | Sign-out endpoint | `DELETE /api/auth/refresh` | The refresh cookie's path means the browser sends it nowhere else; sign-out must revoke server-side | 2026-09-23 |
 | M4 scope | Role administration + persona access matrix now; ownership and transitions with M5 | Ownership needs incidents to exist | 2026-09-23 |
 | Role administration | One admin endpoint in `auth` (`PUT /users/{id}/role`), one transaction; unassign operation in `_shared/incident_ops.py`; last admin cannot be removed | Atomic role changes; incident rules exist once; no lockout | 2026-09-23 |
+| Role inheritance | Employee is the base role; engineers and admins have every employee capability (report, see own reports, edit own while unassigned, request escalation); engineers see reported **or** assigned | The user's model; an engineer's own broken monitor must stay visible to them | 2026-09-23 |
+| M5 scope | Any signed-in user reports; reporter edits own while `unassigned`, admin any time, priority admin-only, engineers status only; assignment and escalation included | Assignment is the only path to `open`; escalation's field is on `incidents` | 2026-09-23 |
 | Integration test database | Database-backed backend tests run against the **dev database**, not a separate test database; each test gets a throwaway PostgreSQL schema (`test_<random>`) created/dropped by the `isolated_schema` fixture (`backend/conftest.py`), with code under test pointed at it via `PGOPTIONS=-c search_path=<schema>` | One PostgreSQL to stand up locally, not two; the schema-per-test isolation keeps writes out of `public` without touching production connection code | 2026-09-23 |
 
 ## Rules settled beneath a parent decision
@@ -102,6 +105,6 @@ Fixed rules recorded under a parent. AD-09, AD-12, and AD-17 have since closed; 
 
 ## Still open
 
-AD-06 · AD-10 · AD-13 · AD-14 · AD-15 ·
+AD-06 · AD-10 · AD-14 · AD-15 ·
 AD-16 · AD-19 — see `AGENTS.md` → Pending architecture
 decisions.

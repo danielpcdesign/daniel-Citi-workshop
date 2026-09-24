@@ -4,8 +4,32 @@ from psycopg import Connection
 ACTIVE = ("open", "in_progress", "blocked")
 
 
-# the one "back to unassigned" operation (AD-17 reassignment, AD-21 demotion), shared because two services need it.
-# runs inside the caller's transaction, so the status change, history row, and note commit together or not at all
+# the one writer of a status change: incident row, history row, and optional note, in the caller's transaction.
+# whether a move is *legal* is decided by incidents/workflow.py (AD-17); this only records it
+def apply_transition(
+    conn: Connection, incident_id: int, from_status: str, to_status: str,
+    actor_id: int, assignee_id: int | None, reason: str | None, note_kind: str | None = None,
+) -> None:
+    conn.execute(
+        "UPDATE incidents SET status = %s, assignee_id = %s, updated_at = now() WHERE id = %s",
+        (to_status, assignee_id, incident_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO incident_status_history (incident_id, from_status, to_status, actor_id, assignee_id, reason)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (incident_id, from_status, to_status, actor_id, assignee_id, reason),
+    )
+    # a reason-bearing move is posted to the conversation so the requester reads why (AD-17)
+    if note_kind:
+        conn.execute(
+            "INSERT INTO ticket_notes (incident_id, author_id, kind, body) VALUES (%s, %s, %s, %s)",
+            (incident_id, actor_id, note_kind, reason),
+        )
+
+
+# back to unassigned (AD-17 reassignment, AD-21 demotion); shared because two services need it
 def unassign(conn: Connection, incident_id: int, actor_id: int, reason: str) -> bool:
     # lock the row so a concurrent status change cannot interleave with this one
     row = conn.execute(
@@ -13,22 +37,7 @@ def unassign(conn: Connection, incident_id: int, actor_id: int, reason: str) -> 
     ).fetchone()
     if row is None or row[0] not in ACTIVE:
         return False
-    conn.execute(
-        "UPDATE incidents SET status = 'unassigned', assignee_id = NULL, updated_at = now() WHERE id = %s",
-        (incident_id,),
-    )
-    conn.execute(
-        """
-        INSERT INTO incident_status_history (incident_id, from_status, to_status, actor_id, assignee_id, reason)
-        VALUES (%s, %s, 'unassigned', %s, NULL, %s)
-        """,
-        (incident_id, row[0], actor_id, reason),
-    )
-    # the requester reads why in the same conversation as everything else (AD-17)
-    conn.execute(
-        "INSERT INTO ticket_notes (incident_id, author_id, kind, body) VALUES (%s, %s, 'unassigned', %s)",
-        (incident_id, actor_id, reason),
-    )
+    apply_transition(conn, incident_id, row[0], "unassigned", actor_id, None, reason, note_kind="unassigned")
     return True
 
 
