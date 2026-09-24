@@ -110,6 +110,25 @@ def test_register_rejects_a_blank_name(auth, migrated_schema):
     assert body["error"]["fields"] == {"full_name": "Value error, must not be empty"}
 
 
+@pytest.mark.parametrize("name,problem", [
+    ("12345", "at least one letter"),
+    ("Ann\u0000e", "control characters"),
+    ("A" * 101, "at most 100"),
+])
+def test_register_rejects_names_that_are_not_names(auth, migrated_schema, name, problem):
+    response, body = call(auth, "POST", "/register", {"email": "a@acme.inc", "password": PASSWORD, "full_name": name})
+    assert response["statusCode"] == 400
+    assert problem in body["error"]["fields"]["full_name"]
+
+
+def test_register_keeps_a_hostile_looking_value_as_plain_data(auth, migrated_schema):
+    # "O'Brien" carries the quote an injection needs: it must be stored verbatim, and the table must survive
+    response, body = call(auth, "POST", "/register", {"email": "a@acme.inc", "password": PASSWORD,
+                                                       "full_name": "Seán O'Brien-Núñez"})
+    assert response["statusCode"] == 201 and body["full_name"] == "Seán O'Brien-Núñez"
+    assert query("SELECT full_name FROM users") == [("Seán O'Brien-Núñez",)]
+
+
 def test_duplicate_registration_is_conflict(auth, migrated_schema):
     register(auth)
     response, body = register(auth, email="ALEX@acme.inc")

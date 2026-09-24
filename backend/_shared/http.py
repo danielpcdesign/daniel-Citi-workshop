@@ -158,6 +158,9 @@ def _error(exc: Exception, req_id: str) -> tuple[int, dict, dict[str, str]]:
         return 400, _envelope("validation_failed", "a referenced record does not exist", req_id), {}
     if isinstance(exc, pg_errors.UniqueViolation):
         return 409, _envelope("conflict", "a record with these values already exists", req_id), {}
+    # a value the database cannot hold (a NUL byte, a number out of range) is the caller's input, not our fault
+    if isinstance(exc, psycopg.DataError):
+        return 400, _envelope("validation_failed", "a value could not be stored", req_id), {}
     if isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError)):
         # a broken connection is dropped so the next invocation reconnects (AD-04)
         reset_conn()

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 import notes
 import policy
 import workflow
-from shared import listing, log
+from shared import listing, log, text
 from shared.authz import ROLES, User
 from shared.db import get_conn
 from shared.errors import Forbidden, NotFound, ValidationFailed
@@ -55,12 +55,15 @@ class IncidentIn(BaseModel):
     floor_id: int | None = None
     seat_id: int | None = None
 
-    @field_validator("title", "description")
+    @field_validator("title")
     @classmethod
-    def not_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be empty")
-        return value.strip()
+    def titled(cls, value: str) -> str:
+        return text.clean(value, text.TITLE_MAX)
+
+    @field_validator("description")
+    @classmethod
+    def described(cls, value: str) -> str:
+        return text.clean(value, text.LONG_TEXT_MAX, multiline=True)
 
 
 class TransitionIn(BaseModel):
@@ -69,11 +72,23 @@ class TransitionIn(BaseModel):
     to: str
     reason: str | None = None
 
+    @field_validator("reason")
+    @classmethod
+    def explained(cls, value: str | None) -> str | None:
+        # blank stays "no reason": whether one is required depends on the move (AD-17)
+        return text.optional(value, text.REASON_MAX, multiline=True)
+
 
 class EscalationRequestIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def explained(cls, value: str) -> str:
+        # blank passes through to _required_reason, which owns that message
+        return text.optional(value, text.REASON_MAX, multiline=True) or ""
 
 
 class EscalationDecisionIn(BaseModel):
@@ -82,6 +97,11 @@ class EscalationDecisionIn(BaseModel):
     # pending is reachable only through a reporter's request (AD-20)
     status: Literal["none", "granted", "declined"]
     reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def explained(cls, value: str) -> str:
+        return text.optional(value, text.REASON_MAX, multiline=True) or ""
 
 
 def _required_reason(reason: str) -> str:
@@ -109,12 +129,16 @@ class IncidentEdit(BaseModel):
     floor_id: int | None = None
     seat_id: int | None = None
 
-    @field_validator("title", "description")
+    # None means "leave unchanged"; a value given must meet the same rules as on create
+    @field_validator("title")
     @classmethod
-    def not_blank(cls, value: str | None) -> str | None:
-        if value is not None and not value.strip():
-            raise ValueError("must not be empty")
-        return value.strip() if value else value
+    def titled(cls, value: str | None) -> str | None:
+        return None if value is None else text.clean(value, text.TITLE_MAX)
+
+    @field_validator("description")
+    @classmethod
+    def described(cls, value: str | None) -> str | None:
+        return None if value is None else text.clean(value, text.LONG_TEXT_MAX, multiline=True)
 
 
 def _to_json(row: tuple, user: User) -> dict:

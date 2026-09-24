@@ -201,3 +201,9 @@ def test_a_parent_archived_after_the_first_check_still_refuses_the_child(svc, tr
     # the re-check inside the transaction catches it: no seat under an archived floor
     assert (status, body["error"]["message"]) == (404, "floor not found")
     assert sql("SELECT count(*) FROM seats WHERE floor_id = %s", (tree["f2"],)) == [(0,)]
+
+
+@pytest.mark.parametrize("name,problem", [("nul\u0000b", "control characters"), ("   ", "must not be empty")])
+def test_place_names_must_be_well_formed(svc, name, problem):
+    status, body = call(svc, "adm", "POST", "/buildings", {"name": name})
+    assert status == 400 and problem in body["error"]["fields"]["name"]

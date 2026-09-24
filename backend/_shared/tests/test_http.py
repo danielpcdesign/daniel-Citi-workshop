@@ -57,6 +57,10 @@ def router() -> Router:
     def dupe(request):
         raise pg_errors.UniqueViolation("duplicate key users_email_key")
 
+    @r.on("POST", "/nul", public=True)
+    def nul(request):
+        raise psycopg.DataError("PostgreSQL text fields cannot contain NUL (0x00) bytes")
+
     @r.on("POST", "/gone", public=True)
     def gone(request):
         raise psycopg.OperationalError("server closed the connection")
@@ -200,6 +204,13 @@ def test_unique_violation_is_409(router):
     status, body, _ = call(router, "POST", "/dupe")
     assert status == 409
     assert body["error"]["code"] == "conflict"
+
+
+def test_data_the_database_cannot_hold_is_a_400_not_a_500(router):
+    # the safety net under the text rules: a NUL byte or an out-of-range number is the caller's input
+    status, body, _ = call(router, "POST", "/nul")
+    assert status == 400
+    assert body["error"]["code"] == "validation_failed" and "NUL" not in body["error"]["message"]
 
 
 def test_lost_connection_is_500_and_resets(router, monkeypatch):

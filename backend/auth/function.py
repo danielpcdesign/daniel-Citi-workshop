@@ -4,7 +4,7 @@ from pydantic import BaseModel, field_validator
 
 import passwords
 import tokens
-from shared import listing, log
+from shared import listing, log, text
 from shared.authz import ROLES, User
 from shared.db import get_conn
 from shared.errors import Conflict, NotFound, Unauthenticated, ValidationFailed
@@ -52,9 +52,7 @@ class RegisterIn(BaseModel):
     @field_validator("full_name")
     @classmethod
     def named(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be empty")
-        return value.strip()
+        return text.person_name(value)
 
 
 class LoginIn(BaseModel):

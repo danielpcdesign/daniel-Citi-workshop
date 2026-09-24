@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from shared import listing
+from shared import listing, text
 from shared.authz import ROLES
 from shared.db import get_conn
 from shared.errors import Forbidden, NotFound
@@ -25,9 +25,7 @@ class NoteIn(BaseModel):
     @field_validator("body")
     @classmethod
     def not_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be empty")
-        return value.strip()
+        return text.clean(value, MAX_BODY, multiline=True)
 
 
 def _to_json(row: tuple) -> dict:

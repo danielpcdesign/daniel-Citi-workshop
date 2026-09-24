@@ -2,6 +2,7 @@ import json
 
 import psycopg
 import pytest
+from pydantic import ValidationError
 
 from _shared.db import conn_str
 from testing_support import PUBLIC, token
@@ -726,3 +727,41 @@ def test_my_reports_for_an_admin(svc, world):
     report(svc, world, who="alice")
     _, body = call(svc, world, "ada", "GET", query=f"reporter_id={world['ada']}")
     assert [i["id"] for i in body["items"]] == [mine]
+
+
+# --- free-text rules (shared text.py): well-formed data, stored as typed ------------------------------
+
+BASE = {"title": "Leak", "description": "d", "category": "plumbing", "priority": "low", "building_id": 1}
+
+
+@pytest.mark.parametrize("field,value,problem", [
+    ("title", "nul\u0000title", "control characters"),
+    ("title", "two\nlines", "control characters"),
+    ("description", "D" * 5001, "at most 5000"),
+    ("description", "bad\u0000", "control characters"),
+])
+def test_incident_text_rules(svc, field, value, problem):
+    with pytest.raises(ValidationError, match=problem):
+        svc.IncidentIn.model_validate({**BASE, field: value})
+
+
+def test_incident_description_keeps_paragraphs(svc):
+    assert svc.IncidentIn.model_validate({**BASE, "description": "first\n\nsecond"}).description == "first\n\nsecond"
+
+
+def test_edit_applies_the_same_rules_and_none_means_unchanged(svc):
+    assert svc.IncidentEdit.model_validate({"title": None}).title is None
+    with pytest.raises(ValidationError, match="control characters"):
+        svc.IncidentEdit.model_validate({"title": "x\u0000"})
+
+
+def test_reasons_are_capped_and_blank_means_absent(svc):
+    assert svc.TransitionIn.model_validate({"to": "blocked", "reason": "  "}).reason is None
+    assert svc.EscalationRequestIn.model_validate({"reason": " "}).reason == ""
+    with pytest.raises(ValidationError, match="at most 1000"):
+        svc.EscalationDecisionIn.model_validate({"status": "granted", "reason": "r" * 1001})
+
+
+def test_note_body_rules(svc):
+    with pytest.raises(ValidationError, match="control characters"):
+        svc.notes.NoteIn.model_validate({"body": "hi\u0000"})

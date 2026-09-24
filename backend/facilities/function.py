@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from psycopg import Connection
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from shared import listing, log
+from shared import listing, log, text
 from shared.authz import ROLES
 from shared.db import get_conn
 from shared.errors import Conflict, NotFound
@@ -44,9 +44,7 @@ class NameIn(BaseModel):
     @field_validator("name")
     @classmethod
     def not_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be empty")
-        return value.strip()
+        return text.clean(value, text.NAME_MAX)
 
 
 def _id(raw: str, noun: str) -> int:
