@@ -8,6 +8,7 @@ omit =
     backend/*/*/*
     backend/_examples/*
     backend/conftest.py
+    backend/testing_support.py
 
 [report]
 # service dirs have no __init__.py; without this, an untested service is silently left out of the total

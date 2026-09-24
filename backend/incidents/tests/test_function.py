@@ -1,20 +1,10 @@
 import json
-import time
 
-import jwt
 import psycopg
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 
-from _shared import authz
 from _shared.db import conn_str
-
-_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-PRIVATE = _KEY.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
-                             serialization.NoEncryption()).decode()
-PUBLIC = _KEY.public_key().public_bytes(serialization.Encoding.PEM,
-                                        serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+from testing_support import PUBLIC, token
 
 
 @pytest.fixture
@@ -42,12 +32,6 @@ def world(svc, migrated_schema) -> dict:
     ids["s1"] = sql("INSERT INTO seats (floor_id, label) VALUES (%s, 'S1') RETURNING id", (ids["f1"],))[0][0]
     ids["old"] = sql("INSERT INTO buildings (name, archived_at) VALUES ('Old', now()) RETURNING id")[0][0]
     return ids
-
-
-def token(user_id: int, role: str) -> str:
-    now = int(time.time())
-    return jwt.encode({"sub": str(user_id), "role": role, "iss": authz.ISSUER, "iat": now, "exp": now + 900},
-                      PRIVATE, algorithm="RS256")
 
 
 def call(svc, world, who, method, path="", body=None, query=""):

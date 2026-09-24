@@ -52,6 +52,9 @@ def _load_service(name: str) -> ModuleType:
     # every lambda's entry file is function.py, so each is loaded under a unique module name
     spec = importlib.util.spec_from_file_location(f"{name.strip('_')}_function", service_dir / "function.py")
     module = importlib.util.module_from_spec(spec)
+    # registered before executing, as the importlib recipe requires: dataclasses resolve their
+    # forward-referenced annotations through sys.modules[module.__name__]
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

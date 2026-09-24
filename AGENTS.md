@@ -1853,6 +1853,27 @@ report.
   Stated scope cut.
 - **Ownership:** the `facilities` service (AD-01). Facility Admin writes; every
   authenticated persona reads, since employees pick a location when reporting.
+- **M6 details (2026-09-23):** archived locations are **hidden everywhere** — lists and
+  direct `GET` (`404`), no `include_archived` option. **No restore** (scope cut: restoring
+  collides with name uniqueness). **No moving** a floor between buildings or a seat between
+  floors — `PUT` accepts only the name/label; renaming is allowed. **Duplicate names** get a
+  friendly `409` from a service check, with the partial unique index as the backstop.
+  `DELETE` means archive (`204`), cascading building → floors → seats in one transaction.
+  **Consequence to handle at M11/M12:** a UI showing an old incident cannot fetch an
+  archived location's name from `facilities`; the planned approach is for incident
+  responses to carry location names via a join in `incidents` (not decided).
+- **Built 2026-09-23 (M6).** `backend/facilities`: one `Level` table (buildings → floors →
+  seats) drives list / create / read / rename / archive, so the three levels share one
+  implementation; SQL identifiers come only from that fixed table. The API uses `name` at
+  every level (stored as `label` for seats). Create re-checks the parent **under
+  `FOR SHARE` inside the transaction** — the same check-then-act race as transitions: a
+  parent archived between the first check and the insert would otherwise gain a child.
+  A test reproduces the race deterministically (the first check archives the floor as a
+  side effect); removing the re-check makes it fail with a `201`. Also: `testing_support.py`
+  (test-only signing helpers, shared by service tests instead of copied), and the test
+  loader now registers each module in `sys.modules` before executing it (dataclasses
+  resolve forward references through it). 323 tests, 100%. Live: create at all three
+  levels 201, duplicate 409, employee write 403 / read 200, archive cascade 204 then 404.
 
 ---
 
