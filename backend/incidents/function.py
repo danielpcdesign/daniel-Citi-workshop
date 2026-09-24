@@ -402,12 +402,13 @@ def assign(request: Request) -> tuple[int, dict]:
                 {"incident": "move it to unassigned first, with a reason (reassignment)"},
             )
         # the database lets assignee_id reference any user; "engineers only" is enforced here (AD-21)
+        # an engineer is someone holding the engineer role, whatever else they hold (v1.1)
         target = conn.execute(
-            """SELECT u.role, p.is_available FROM users u
-               LEFT JOIN engineer_profiles p ON p.user_id = u.id WHERE u.id = %s""",
+            """SELECT EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'engineer'), p.is_available
+               FROM users u LEFT JOIN engineer_profiles p ON p.user_id = u.id WHERE u.id = %s""",
             (data.engineer_id,),
         ).fetchone()
-        if target is None or target[0] != "engineer":
+        if target is None or not target[0]:
             raise ValidationFailed("invalid assignee", {"engineer_id": f"user {data.engineer_id} is not an engineer"})
         # an unavailable engineer gets no new work; the admin switches them back on first, deliberately (M7)
         if not target[1]:

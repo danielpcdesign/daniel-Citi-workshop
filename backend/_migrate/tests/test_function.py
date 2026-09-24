@@ -85,7 +85,8 @@ def test_misnamed_migration_is_refused(migrate):
 def test_first_admin_is_seeded_once(migrate):
     use_real_migrations(migrate)
     assert migrate.run(admin())["admin"] == "seeded"
-    assert query("SELECT email, role, password_hash FROM users") == [("first@acme.inc", "admin", HASH)]
+    assert query("SELECT u.email, r.role, u.password_hash FROM users u JOIN user_roles r ON r.user_id = u.id") == [
+        ("first@acme.inc", "admin", HASH)]
     # an admin now exists: a different email changes nothing
     assert migrate.run(admin("second@acme.inc"))["admin"] == "exists"
     assert query("SELECT count(*) FROM users") == [(1,)]
@@ -114,8 +115,8 @@ def test_plaintext_password_is_refused(migrate):
 def test_registered_email_is_not_silently_promoted(migrate):
     use_real_migrations(migrate)
     migrate.run(admin())
-    execute("UPDATE users SET role = 'employee'")
-    with pytest.raises(RuntimeError, match="already registered as employee"):
+    execute("DELETE FROM user_roles")
+    with pytest.raises(RuntimeError, match="already registered"):
         migrate.run(admin())
 
 

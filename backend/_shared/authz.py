@@ -18,7 +18,10 @@ REQUIRED_CLAIMS = ["exp", "iat", "iss", "sub", "role"]
 @dataclass(frozen=True)
 class User:
     id: int
+    # the active role (v1.1): a person may hold several, but each request acts as exactly one
     role: str
+    # the refresh-token family this token was issued under; lets auth remember a role switch for the session
+    session_id: str | None = None
 
 
 def _public_key() -> str:
@@ -58,4 +61,5 @@ def authenticate(event: dict) -> User:
     except (TypeError, ValueError):
         logger.info("rejected access token: non-numeric subject")
         raise Unauthenticated("invalid token")
-    return User(user_id, role)
+    session = claims.get("sid")
+    return User(user_id, role, session if isinstance(session, str) else None)

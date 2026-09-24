@@ -16,7 +16,9 @@ import _shared.http
 import _shared.incident_ops
 import _shared.listing
 import _shared.log
+import _shared.roles
 import _shared.router
+import _shared.text
 import _shared.visibility
 
 BACKEND = Path(__file__).parent
@@ -24,7 +26,8 @@ BACKEND = Path(__file__).parent
 # service code imports the vendored `shared` package; point that name at the _shared source instead,
 # so tests exercise the code coverage counts and do not depend on bin/sync-shared.sh having run
 sys.modules["shared"] = _shared
-for _name in ("authz", "db", "errors", "http", "incident_ops", "listing", "log", "router", "visibility"):
+for _name in ("authz", "db", "errors", "http", "incident_ops", "listing", "log", "roles", "router", "text",
+              "visibility"):
     sys.modules[f"shared.{_name}"] = getattr(_shared, _name)
 
 # the local dev database, as terraform injects it into lambdas under localstack (infra/locals.tf)

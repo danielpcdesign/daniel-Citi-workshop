@@ -3,6 +3,7 @@ import pytest
 
 from _shared import incident_ops
 from _shared.db import conn_str
+from testing_support import insert_user
 
 
 @pytest.fixture
@@ -15,10 +16,7 @@ def conn(migrated_schema):
 def people(conn) -> dict[str, int]:
     ids = {}
     for name, role in (("reporter", "employee"), ("engineer", "engineer"), ("admin", "admin")):
-        ids[name] = conn.execute(
-            "INSERT INTO users (email, password_hash, full_name, role) VALUES (%s, 'x', %s, %s) RETURNING id",
-            (f"{name}@acme.inc", name, role),
-        ).fetchone()[0]
+        ids[name] = insert_user(f"{name}@acme.inc", name, role, conn)
     ids["building"] = conn.execute("INSERT INTO buildings (name) VALUES ('HQ') RETURNING id").fetchone()[0]
     return ids
 

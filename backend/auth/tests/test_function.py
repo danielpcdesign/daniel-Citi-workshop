@@ -3,6 +3,7 @@ import logging
 import sys
 import types
 
+import jwt
 import psycopg
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -10,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from _shared import authz
 from _shared.db import conn_str
+from testing_support import insert_user
 
 PASSWORD = "correct horse battery"
 
@@ -83,7 +85,8 @@ def test_register_creates_an_employee_and_ignores_a_requested_role(auth, migrate
     response, body = call(auth, "POST", "/register", {
         "email": "  Alex@ACME.inc ", "password": PASSWORD, "full_name": " Alex ", "role": "admin"})
     assert response["statusCode"] == 201
-    assert body == {"id": body["id"], "email": "alex@acme.inc", "full_name": "Alex", "role": "employee"}
+    assert body == {"id": body["id"], "email": "alex@acme.inc", "full_name": "Alex", "role": "employee",
+                    "roles": ["employee"]}
     stored = query("SELECT password_hash FROM users")[0][0]
     assert stored.startswith("$2b$10$") and PASSWORD not in stored
 
@@ -144,7 +147,7 @@ def test_login_returns_a_verifiable_access_token_and_a_locked_down_cookie(auth, 
     assert response["statusCode"] == 200
     assert body["expires_in"] == 900
     user = authz.authenticate({"headers": {"x-access-token": body["access_token"]}})
-    assert user == authz.User(body["user"]["id"], "employee")
+    assert (user.id, user.role) == (body["user"]["id"], "employee") and user.session_id
     cookie = response["cookies"][0]
     for attribute in ("HttpOnly", "Secure", "SameSite=Strict", "Path=/api/auth/refresh", "Max-Age=604800"):
         assert attribute in cookie
@@ -239,14 +242,18 @@ def test_refresh_without_a_valid_cookie(auth, migrated_schema, cookie, message):
     assert (response["statusCode"], body["error"]["message"]) == (401, message)
 
 
-def test_refresh_reads_the_role_fresh(auth, migrated_schema):
+def test_refresh_reads_the_roles_fresh_and_keeps_the_active_one(auth, migrated_schema):
     register(auth)
     first = cookie_value(login(auth)[0])
-    conn = psycopg.connect(conn_str(), autocommit=True)
-    conn.execute("UPDATE users SET role = 'engineer'")
-    conn.close()
+    query_exec("INSERT INTO user_roles (user_id, role) SELECT id, 'engineer' FROM users")
     _, body = call(auth, "POST", "/refresh", cookie=first)
-    assert authz.authenticate({"headers": {"x-access-token": body["access_token"]}}).role == "engineer"
+    # the grant shows at once; the session keeps acting as the role it had (v1.1)
+    assert body["user"]["roles"] == ["employee", "engineer"] and body["user"]["role"] == "employee"
+
+
+def query_exec(sql, params=()):
+    with psycopg.connect(conn_str(), autocommit=True) as conn:
+        conn.execute(sql, params)
 
 
 # --- sign-out (DELETE /refresh) -------------------------------------------------------------
@@ -294,10 +301,7 @@ def test_health(auth, migrated_schema):
 
 def make_user(role: str, email: str) -> int:
     with psycopg.connect(conn_str(), autocommit=True) as conn:
-        return conn.execute(
-            "INSERT INTO users (email, password_hash, full_name, role) VALUES (%s, 'x', %s, %s) RETURNING id",
-            (email, email.split("@")[0], role),
-        ).fetchone()[0]
+        return insert_user(email, email.split("@")[0], role, conn)
 
 
 def token_for(auth, user_id: int, role: str) -> str:
@@ -311,7 +315,12 @@ def admin(auth, migrated_schema):
 
 
 def set_role(auth, token, user_id, role):
-    return call(auth, "PUT", f"/users/{user_id}/role", {"role": role}, token=token)
+    # the single-role shape the older tests speak, as the v1.1 whole-list request
+    return set_roles(auth, token, user_id, [] if role == "employee" else [role])
+
+
+def set_roles(auth, token, user_id, roles):
+    return call(auth, "PUT", f"/users/{user_id}/roles", {"roles": roles}, token=token)
 
 
 def test_list_users_filters_by_search_and_role(auth, admin):
@@ -360,7 +369,7 @@ def test_the_last_admin_cannot_be_removed(auth, admin):
     admin_id, token = admin
     response, body = set_role(auth, token, admin_id, "employee")
     assert (response["statusCode"], body["error"]["message"]) == (409, "the last admin cannot be removed")
-    assert query("SELECT role FROM users WHERE id = %s", (admin_id,)) == [("admin",)]
+    assert query("SELECT role FROM user_roles WHERE user_id = %s", (admin_id,)) == [("admin",)]
 
 
 def test_an_admin_can_step_down_when_another_exists(auth, admin):
@@ -393,14 +402,14 @@ def test_role_change_rejects_bad_input(auth, admin, user_id, role, status):
     ("GET", "", (200, 200, 200, 200)),
     ("GET", "/me", (401, 200, 200, 200)),
     ("GET", "/users", (401, 403, 403, 200)),
-    ("PUT", "/users/{target}/role", (401, 403, 403, 200)),
+    ("PUT", "/users/{target}/roles", (401, 403, 403, 200)),
 ])
 def test_persona_access_matrix(auth, migrated_schema, method, path, expected):
     target = make_user("employee", "target@acme.inc")
     make_user("admin", "keeper@acme.inc")  # so role changes never trip the last-admin rule
     tokens = [None] + [token_for(auth, make_user(role, f"{role}@acme.inc"), role)
                        for role in ("employee", "engineer", "admin")]
-    body = {"role": "employee"} if method == "PUT" else None
+    body = {"roles": []} if method == "PUT" else None
     statuses = tuple(call(auth, method, path.replace("{target}", str(target)), body, token=t)[0]["statusCode"]
                      for t in tokens)
     assert statuses == expected
@@ -424,3 +433,98 @@ def test_list_users_pages_and_rejects_bad_filters(auth, admin):
     # a literal underscore, not a single-character wildcard
     make_user("employee", "under_score@acme.inc")
     assert [u["email"] for u in get("q=r_s")[1]["items"]] == ["under_score@acme.inc"]
+
+
+# --- several roles per user (v1.1) ------------------------------------------------------------
+
+def sign_in_as(auth, email, roles_held):
+    # a real account with a real password, holding extra roles, signed in through /login
+    register(auth, email=email)
+    for role in roles_held:
+        query_exec("INSERT INTO user_roles (user_id, role) SELECT id, %s FROM users WHERE email = %s", (role, email))
+    user_id = query("SELECT id FROM users WHERE email = %s", (email,))[0][0]
+    return user_id, login(auth, email=email)
+
+
+def claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+def test_sign_in_starts_as_the_highest_role_and_lists_all(auth, migrated_schema):
+    _, (response, body) = sign_in_as(auth, "multi@acme.inc", ["engineer", "admin"])
+    assert body["user"]["role"] == "admin" and body["user"]["roles"] == ["employee", "engineer", "admin"]
+    token_claims = claims(body["access_token"])
+    assert token_claims["role"] == "admin" and token_claims["roles"] == ["employee", "engineer", "admin"]
+
+
+def test_switching_role_issues_a_token_and_survives_refresh(auth, migrated_schema):
+    _, (response, body) = sign_in_as(auth, "multi@acme.inc", ["engineer", "admin"])
+    cookie = cookie_value(response)
+    switched, switch_body = call(auth, "POST", "/active-role", {"role": "engineer"}, token=body["access_token"])
+    assert switched["statusCode"] == 200 and switch_body["user"]["role"] == "engineer"
+    assert authz.authenticate({"headers": {"x-access-token": switch_body["access_token"]}}).role == "engineer"
+    # a reload refreshes: the session stays in the role it switched to
+    _, refreshed = call(auth, "POST", "/refresh", cookie=cookie)
+    assert refreshed["user"]["role"] == "engineer"
+
+
+def test_switching_to_a_role_not_held_is_refused(auth, migrated_schema):
+    _, (_, body) = sign_in_as(auth, "eng@acme.inc", ["engineer"])
+    token = body["access_token"]
+    assert call(auth, "POST", "/active-role", {"role": "admin"}, token=token)[0]["statusCode"] == 403
+    assert call(auth, "POST", "/active-role", {"role": "root"}, token=token)[0]["statusCode"] == 400
+
+
+def test_a_removed_active_role_falls_back_to_the_highest_held(auth, migrated_schema):
+    user_id, (response, body) = sign_in_as(auth, "multi@acme.inc", ["engineer", "admin"])
+    query_exec("DELETE FROM user_roles WHERE user_id = %s AND role = 'admin'", (user_id,))
+    _, refreshed = call(auth, "POST", "/refresh", cookie=cookie_value(response))
+    assert refreshed["user"]["role"] == "engineer"
+
+
+def test_switch_without_a_session_still_answers(auth, migrated_schema):
+    # a token minted before v1.1 carries no session id: the switch works, it just is not remembered
+    user_id = make_user("employee", "old@acme.inc")
+    response, body = call(auth, "POST", "/active-role", {"role": "employee"}, token=token_for(auth, user_id, "employee"))
+    assert response["statusCode"] == 200 and body["user"]["role"] == "employee"
+
+
+def test_me_reports_the_active_role(auth, migrated_schema):
+    _, (_, body) = sign_in_as(auth, "multi@acme.inc", ["admin"])
+    _, switched = call(auth, "POST", "/active-role", {"role": "employee"}, token=body["access_token"])
+    _, me = call(auth, "GET", "/me", token=switched["access_token"])
+    assert me["role"] == "employee" and me["roles"] == ["employee", "admin"]
+
+
+def test_an_admin_can_grant_several_roles_at_once(auth, admin):
+    admin_id, token = admin
+    user_id = make_user("employee", "both@acme.inc")
+    response, body = set_roles(auth, token, user_id, ["engineer", "admin", "employee"])
+    assert response["statusCode"] == 200 and body["user"]["roles"] == ["employee", "engineer", "admin"]
+    assert query("SELECT count(*) FROM engineer_profiles WHERE user_id = %s", (user_id,)) == [(1,)]
+    # dropping admin only keeps the engineer profile and its work
+    _, body = set_roles(auth, token, user_id, ["engineer"])
+    assert body["user"]["roles"] == ["employee", "engineer"] and body["unassigned_incidents"] == []
+
+
+def test_list_users_filters_by_held_and_missing_roles(auth, admin):
+    _, token = admin
+    make_user("engineer", "eng@acme.inc")
+    make_user("employee", "emp@acme.inc")
+
+    def emails(query_string):
+        event = {"rawPath": "/api/auth/users", "rawQueryString": query_string,
+                 "requestContext": {"http": {"method": "GET"}}, "headers": {"x-access-token": token}}
+        response = auth.handler(event, None)
+        return response["statusCode"], [u["email"] for u in json.loads(response["body"]).get("items", [])]
+
+    assert emails("role=engineer") == (200, ["eng@acme.inc"])
+    assert emails("role=employee")[1] == ["boss@acme.inc", "emp@acme.inc", "eng@acme.inc"]
+    assert emails("lacks=engineer") == (200, ["boss@acme.inc", "emp@acme.inc"])
+    assert emails("lacks=employee")[0] == 400
+    assert emails("sort=-role")[1][0] == "boss@acme.inc"
+
+
+def test_switch_for_a_user_that_no_longer_exists_is_404(auth, migrated_schema):
+    response, _ = call(auth, "POST", "/active-role", {"role": "employee"}, token=token_for(auth, 424242, "employee"))
+    assert response["statusCode"] == 404

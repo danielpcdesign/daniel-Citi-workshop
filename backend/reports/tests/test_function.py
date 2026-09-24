@@ -5,7 +5,7 @@ import psycopg
 import pytest
 
 from _shared.db import conn_str
-from testing_support import PUBLIC, token
+from testing_support import PUBLIC, insert_user, token
 
 T0 = datetime(2026, 9, 1, 9, 0, tzinfo=timezone.utc)
 ROLE = {"alice": "employee", "bob": "employee", "eve": "engineer", "ada": "admin"}
@@ -27,8 +27,7 @@ def sql(statement, params=()):
 def world(svc) -> dict:
     ids = {}
     for name, role in ROLE.items():
-        ids[name] = sql("INSERT INTO users (email, password_hash, full_name, role) VALUES (%s, 'x', %s, %s) RETURNING id",
-                        (f"{name}@acme.inc", name, role))[0][0]
+        ids[name] = insert_user(f"{name}@acme.inc", name, role)
     ids["hq"] = sql("INSERT INTO buildings (name) VALUES ('HQ') RETURNING id")[0][0]
     ids["annex"] = sql("INSERT INTO buildings (name) VALUES ('Annex') RETURNING id")[0][0]
     ids["f1"] = sql("INSERT INTO floors (building_id, name) VALUES (%s, 'F1') RETURNING id", (ids["hq"],))[0][0]

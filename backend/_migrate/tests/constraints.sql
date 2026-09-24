@@ -27,9 +27,11 @@ END;
 $$;
 
 -- fixtures; ids captured, never hard-coded, because sequences do not roll back
-INSERT INTO users (email, password_hash, full_name, role) VALUES ('emp@acme.inc', 'x', 'Emp', 'employee') RETURNING id AS emp \gset
-INSERT INTO users (email, password_hash, full_name, role) VALUES ('eng@acme.inc', 'x', 'Eng', 'engineer') RETURNING id AS eng \gset
-INSERT INTO users (email, password_hash, full_name, role) VALUES ('adm@acme.inc', 'x', 'Adm', 'admin') RETURNING id AS adm \gset
+-- v1.1: employee is implicit; engineer and admin are user_roles rows (003_user_roles)
+INSERT INTO users (email, password_hash, full_name) VALUES ('emp@acme.inc', 'x', 'Emp') RETURNING id AS emp \gset
+INSERT INTO users (email, password_hash, full_name) VALUES ('eng@acme.inc', 'x', 'Eng') RETURNING id AS eng \gset
+INSERT INTO users (email, password_hash, full_name) VALUES ('adm@acme.inc', 'x', 'Adm') RETURNING id AS adm \gset
+INSERT INTO user_roles (user_id, role) VALUES (:eng, 'engineer'), (:adm, 'admin');
 INSERT INTO buildings (name) VALUES ('HQ') RETURNING id AS hq \gset
 INSERT INTO buildings (name) VALUES ('Annex') RETURNING id AS annex \gset
 INSERT INTO floors (building_id, name) VALUES (:hq, 'F1') RETURNING id AS f1 \gset

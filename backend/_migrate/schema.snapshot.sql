@@ -130,11 +130,9 @@ CREATE TABLE public.users (
     email text NOT NULL,
     password_hash text NOT NULL,
     full_name text NOT NULL,
-    role text DEFAULT 'employee'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT users_email_acme_inc CHECK (((email = lower(btrim(email))) AND (email ~ '^[^@[:space:]]+@acme\.inc$'::text))),
-    CONSTRAINT users_full_name_check CHECK ((btrim(full_name) <> ''::text)),
-    CONSTRAINT users_role_check CHECK ((role = ANY (ARRAY['employee'::text, 'engineer'::text, 'admin'::text])))
+    CONSTRAINT users_full_name_check CHECK ((btrim(full_name) <> ''::text))
 );
 
 CREATE VIEW public.incidents_read AS
@@ -177,7 +175,9 @@ CREATE TABLE public.refresh_tokens (
     family_id uuid NOT NULL,
     expires_at timestamp with time zone NOT NULL,
     revoked_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    active_role text,
+    CONSTRAINT refresh_tokens_active_role_check CHECK ((active_role = ANY (ARRAY['employee'::text, 'engineer'::text, 'admin'::text])))
 );
 
 ALTER TABLE public.refresh_tokens ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
@@ -222,6 +222,13 @@ ALTER TABLE public.ticket_notes ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY
     CACHE 1
 );
 
+CREATE TABLE public.user_roles (
+    user_id bigint NOT NULL,
+    role text NOT NULL,
+    granted_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT user_roles_role_check CHECK ((role = ANY (ARRAY['engineer'::text, 'admin'::text])))
+);
+
 CREATE VIEW public.ticket_notes_read AS
  SELECT n.id,
     n.incident_id,
@@ -233,7 +240,15 @@ CREATE VIEW public.ticket_notes_read AS
     n.deleted_at,
     n.deleted_by,
     u.full_name AS author_name,
-    u.role AS author_role
+    COALESCE(( SELECT r.role
+           FROM public.user_roles r
+          WHERE (r.user_id = u.id)
+          ORDER BY
+                CASE r.role
+                    WHEN 'admin'::text THEN 2
+                    ELSE 1
+                END DESC
+         LIMIT 1), 'employee'::text) AS author_role
    FROM (public.ticket_notes n
      JOIN public.users u ON ((u.id = n.author_id)));
 
@@ -279,6 +294,9 @@ ALTER TABLE ONLY public.seats
 ALTER TABLE ONLY public.ticket_notes
     ADD CONSTRAINT ticket_notes_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY public.user_roles
+    ADD CONSTRAINT user_roles_pkey PRIMARY KEY (user_id, role);
+
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_email_key UNIQUE (email);
 
@@ -302,6 +320,8 @@ CREATE INDEX refresh_tokens_family_idx ON public.refresh_tokens USING btree (fam
 CREATE UNIQUE INDEX seats_label_active_uq ON public.seats USING btree (floor_id, lower(label)) WHERE (archived_at IS NULL);
 
 CREATE INDEX ticket_notes_incident_idx ON public.ticket_notes USING btree (incident_id, created_at);
+
+CREATE INDEX user_roles_role_idx ON public.user_roles USING btree (role, user_id);
 
 CREATE TRIGGER incident_status_history_no_truncate BEFORE TRUNCATE ON public.incident_status_history FOR EACH STATEMENT EXECUTE FUNCTION public.reject_history_change();
 
@@ -357,4 +377,7 @@ ALTER TABLE ONLY public.ticket_notes
 
 ALTER TABLE ONLY public.ticket_notes
     ADD CONSTRAINT ticket_notes_incident_id_fkey FOREIGN KEY (incident_id) REFERENCES public.incidents(id);
+
+ALTER TABLE ONLY public.user_roles
+    ADD CONSTRAINT user_roles_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 

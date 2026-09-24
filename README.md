@@ -560,6 +560,18 @@ Recorded so the gaps are on the record rather than implied by silence. Each is a
 
 ## Roadmap
 
+### Version 1.1 — started 2026-09-24
+
+The MVP was demonstrated on 2026-09-24. These go beyond it; the decision register above describes the MVP as built.
+
+| Area | Focus | Status |
+|---|---|---|
+| Multiple roles per user | `user_roles` join table replaces the single `users.role`; one **active** role at a time, carried in the token beside the held roles and switched through `POST /api/auth/active-role`; highest role active at sign-in and kept on refresh; admins set a user's whole role list with `PUT /api/auth/users/{id}/roles` (employee always held; removing engineer still unassigns active tickets; last-admin guard counts the join table) | Started |
+| Device settings | Per-device appearance (light / dark / system) and accessibility (colour-blind-safe status palette, reduced motion) kept in the browser | Started |
+| Role selector | A "Viewing as" setting for people holding several roles, backed by the active-role switch | Started |
+
+### Later
+
 Beyond the MVP, and not started:
 
 | Area | Focus |

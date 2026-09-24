@@ -47,7 +47,7 @@ def _seed_admin(conn: Connection, bootstrap: dict) -> str:
     password_hash = bootstrap.get("password_hash") or ""
 
     with conn.transaction():
-        if conn.execute("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1").fetchone():
+        if conn.execute("SELECT 1 FROM user_roles WHERE role = 'admin' LIMIT 1").fetchone():
             return "exists"
 
         # no admin means nobody can ever promote anyone: fail the deploy rather than ship that
@@ -60,15 +60,15 @@ def _seed_admin(conn: Connection, bootstrap: dict) -> str:
         if not BCRYPT_PATTERN.match(password_hash):
             raise ValueError("bootstrap_admin_password_hash is not a bcrypt hash")
 
-        existing = conn.execute("SELECT role FROM users WHERE email = %s", (email,)).fetchone()
         # silently promoting an existing account would hand admin to whoever registered that email
-        if existing:
-            raise RuntimeError(f"{email} is already registered as {existing[0]}; choose another email")
+        if conn.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone():
+            raise RuntimeError(f"{email} is already registered; choose another email")
 
-        conn.execute(
-            "INSERT INTO users (email, password_hash, full_name, role) VALUES (%s, %s, %s, 'admin')",
+        (user_id,) = conn.execute(
+            "INSERT INTO users (email, password_hash, full_name) VALUES (%s, %s, %s) RETURNING id",
             (email, password_hash, full_name),
-        )
+        ).fetchone()
+        conn.execute("INSERT INTO user_roles (user_id, role) VALUES (%s, 'admin')", (user_id,))
     logger.info("seeded first admin %s", email)
     return "seeded"
 

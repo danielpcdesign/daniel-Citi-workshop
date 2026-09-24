@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from _shared.db import conn_str
-from testing_support import PUBLIC, token
+from testing_support import PUBLIC, insert_user, token
 
 
 @pytest.fixture
@@ -24,8 +24,7 @@ def sql(statement, params=()):
 def world(svc, migrated_schema) -> dict:
     ids = {}
     for name, role in (("alice", "employee"), ("bob", "employee"), ("eve", "engineer"), ("ada", "admin")):
-        ids[name] = sql("INSERT INTO users (email, password_hash, full_name, role) VALUES (%s, 'x', %s, %s) RETURNING id",
-                        (f"{name}@acme.inc", name, role))[0][0]
+        ids[name] = insert_user(f"{name}@acme.inc", name, role)
     # an engineer always has a profile: M4's promotion creates both in one transaction
     sql("INSERT INTO engineer_profiles (user_id, created_by) VALUES (%s, %s)", (ids["eve"], ids["ada"]))
     ids["hq"] = sql("INSERT INTO buildings (name) VALUES ('HQ') RETURNING id")[0][0]
@@ -355,7 +354,7 @@ def test_an_engineer_cannot_move_a_ticket_they_cannot_see(svc, world):
 
 
 def test_reassignment_goes_back_through_unassigned(svc, world):
-    second = sql("INSERT INTO users (email, password_hash, full_name, role) VALUES ('fred@acme.inc', 'x', 'fred', 'engineer') RETURNING id")[0][0]
+    second = insert_user("fred@acme.inc", "fred", "engineer")
     sql("INSERT INTO engineer_profiles (user_id, created_by) VALUES (%s, %s)", (second, world["ada"]))
     world["fred"] = second
     incident_id = report(svc, world)[1]["id"]
@@ -507,7 +506,7 @@ def test_an_unavailable_engineer_is_not_assigned_new_work(svc, world):
 
 
 def test_an_engineer_without_a_profile_is_refused(svc, world):
-    orphan = sql("INSERT INTO users (email, password_hash, full_name, role) VALUES ('orphan@acme.inc', 'x', 'o', 'engineer') RETURNING id")[0][0]
+    orphan = insert_user("orphan@acme.inc", "o", "engineer")
     world["orphan"] = orphan
     incident_id = report(svc, world)[1]["id"]
     assert give(svc, world, incident_id, engineer="orphan")[0] == 400

@@ -5,7 +5,7 @@ import psycopg
 import pytest
 
 from _shared.db import conn_str
-from testing_support import PUBLIC, token
+from testing_support import PUBLIC, insert_user, token
 
 
 @pytest.fixture
@@ -24,8 +24,7 @@ def sql(statement, params=()):
 def team(svc) -> dict:
     ids = {}
     for name, role in (("ada", "admin"), ("emp", "employee"), ("eve", "engineer"), ("fred", "engineer"), ("gus", "engineer")):
-        ids[name] = sql("INSERT INTO users (email, password_hash, full_name, role) VALUES (%s, 'x', %s, %s) RETURNING id",
-                        (f"{name}@acme.inc", name.title(), role))[0][0]
+        ids[name] = insert_user(f"{name}@acme.inc", name.title(), role)
     for name in ("eve", "fred", "gus"):
         sql("INSERT INTO engineer_profiles (user_id, created_by) VALUES (%s, %s)", (ids[name], ids["ada"]))
     building = sql("INSERT INTO buildings (name) VALUES ('HQ') RETURNING id")[0][0]

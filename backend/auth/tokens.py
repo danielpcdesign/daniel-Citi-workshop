@@ -36,10 +36,14 @@ def _private_key() -> str:
     return _signing_key
 
 
-def issue_access(user: User) -> str:
+def issue_access(user: User, roles: list[str] | None = None) -> str:
     now = int(time.time())
-    # sub is a string: the jwt spec requires it, and pyjwt enforces it
-    claims = {"sub": str(user.id), "role": user.role, "iss": ISSUER, "iat": now, "exp": now + ACCESS_TTL}
+    # sub is a string: the jwt spec requires it, and pyjwt enforces it. `role` is the active role every service
+    # checks; `roles` (all held) and `sid` (the session) are for the client and for switching (v1.1)
+    claims = {"sub": str(user.id), "role": user.role, "roles": roles or [user.role],
+              "iss": ISSUER, "iat": now, "exp": now + ACCESS_TTL}
+    if user.session_id:
+        claims["sid"] = user.session_id
     return jwt.encode(claims, _private_key(), algorithm=ALGORITHM)
 
 
@@ -48,24 +52,34 @@ def _digest(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
-def issue_refresh(conn: Connection, user_id: int, family_id: uuid.UUID | None = None) -> str:
+def issue_refresh(conn: Connection, user_id: int, family_id: uuid.UUID | None = None,
+                  active_role: str | None = None) -> tuple[str, uuid.UUID]:
     token = secrets.token_urlsafe(32)
+    family_id = family_id or uuid.uuid4()
     conn.execute(
         """
-        INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at)
-        VALUES (%s, %s, %s, now() + make_interval(secs => %s))
+        INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at, active_role)
+        VALUES (%s, %s, %s, now() + make_interval(secs => %s), %s)
         """,
-        (user_id, _digest(token), family_id or uuid.uuid4(), REFRESH_TTL),
+        (user_id, _digest(token), family_id, REFRESH_TTL, active_role),
     )
-    return token
+    return token, family_id
 
 
-def rotate(conn: Connection, token: str) -> tuple[int, str]:
+def set_active_role(conn: Connection, family_id: str, role: str) -> None:
+    # only the live token of the family matters: rotation copies it forward
+    conn.execute(
+        "UPDATE refresh_tokens SET active_role = %s WHERE family_id = %s AND revoked_at IS NULL",
+        (role, family_id),
+    )
+
+
+def rotate(conn: Connection, token: str) -> tuple[int, str, uuid.UUID, str | None]:
     # decide inside the transaction, act outside it: raising inside would roll back a family revocation
     with conn.transaction():
         row = conn.execute(
             """
-            SELECT user_id, family_id, revoked_at IS NOT NULL, expires_at <= now()
+            SELECT user_id, family_id, revoked_at IS NOT NULL, expires_at <= now(), active_role
             FROM refresh_tokens WHERE token_hash = %s
             FOR UPDATE
             """,
@@ -74,7 +88,7 @@ def rotate(conn: Connection, token: str) -> tuple[int, str]:
         if row is None:
             verdict = "unknown"
         else:
-            user_id, family_id, revoked, expired = row
+            user_id, family_id, revoked, expired, active_role = row
             if revoked:
                 verdict = "reused"
             elif expired:
@@ -83,7 +97,8 @@ def rotate(conn: Connection, token: str) -> tuple[int, str]:
                 conn.execute(
                     "UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = %s", (_digest(token),)
                 )
-                return user_id, issue_refresh(conn, user_id, family_id)
+                rotated, _ = issue_refresh(conn, user_id, family_id, active_role)
+                return user_id, rotated, family_id, active_role
 
     if verdict == "reused":
         # a rotated token presented again: the holder and a thief both have one, so end the whole family (AD-07d)
