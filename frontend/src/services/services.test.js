@@ -12,7 +12,7 @@ import {
 } from './incidentService.js'
 import { addNote, deleteNote, editNote, listNotes } from './noteService.js'
 import { listBuildings, listFloors, listSeats } from './facilityService.js'
-import { listAvailableEngineers } from './engineerService.js'
+import { listAvailableEngineers, listEngineers } from './engineerService.js'
 
 let fetchMock
 
@@ -127,5 +127,7 @@ describe('facility and engineer services', () =>
         expect(lastCall().url).toBe('/api/facilities/floors/6/seats?limit=100&sort=name')
         await listAvailableEngineers()
         expect(lastCall().url).toBe('/api/engineers?available=true&sort=workload&limit=100')
+        await listEngineers()
+        expect(lastCall().url).toBe('/api/engineers?sort=name&limit=100')
     })
 })

@@ -12,6 +12,8 @@ export default function StatusBoard({ columns })
         <Box
             data-layout={isMobile ? 'scroll' : 'grid'}
             sx={{
+                // positioned, so the cards' absolutely placed screen-reader text is clipped by this scroller, not the page
+                position: 'relative',
                 display: 'grid',
                 gridAutoFlow: 'column',
                 gridAutoColumns: isMobile ? '80%' : 'minmax(164px, 1fr)',

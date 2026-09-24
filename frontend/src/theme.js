@@ -110,10 +110,14 @@ export const theme = createTheme({
 })
 
 // read by screen readers, not drawn: context that sighted users get from layout
+// sizes are strings: in sx a bare 1 means 100%, which made these spans page-wide and pushed the page sideways
 export const srOnly = {
     position: 'absolute',
-    width: 1,
-    height: 1,
+    width: '1px',
+    height: '1px',
+    margin: '-1px',
+    padding: 0,
+    border: 0,
     overflow: 'hidden',
     clip: 'rect(0 0 0 0)',
     whiteSpace: 'nowrap',

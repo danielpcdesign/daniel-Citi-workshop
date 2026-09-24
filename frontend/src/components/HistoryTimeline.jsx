@@ -48,7 +48,8 @@ function withHolderChange(history)
 }
 
 // every status change on the ticket, newest first, read from the detail response it polls with (AD-17, M12)
-export default function HistoryTimeline({ history, now, sx })
+// title and headingComponent let the dashboard name the ticket and nest the heading under its own sections
+export default function HistoryTimeline({ history, now, sx, title = 'History', headingComponent = 'h2' })
 {
     const isMobile = useMediaQuery({ query: MOBILE_QUERY })
     const [expanded, setExpanded] = useState(false)
@@ -67,7 +68,7 @@ export default function HistoryTimeline({ history, now, sx })
 
     return (
         <Paper variant="outlined" component="section" aria-labelledby="history-heading" sx={[{ p: { xs: 2, md: 3 } }, sx]}>
-            <Typography id="history-heading" variant="h5" component="h2">History</Typography>
+            <Typography id="history-heading" variant="h5" component={headingComponent}>{title}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Every status change on this ticket, latest first.
             </Typography>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, Link as RouterLink } from 'react-router-dom'
+import { NavLink, Link as RouterLink, useMatch } from 'react-router-dom'
 import { useMediaQuery } from 'react-responsive'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -43,6 +43,8 @@ export default function AppShell({ children })
     const { user, signOut } = useAuth()
     const isMobile = useMediaQuery({ query: MOBILE_QUERY })
     const [menuOpen, setMenuOpen] = useState(false)
+    // the dashboard adds a section nav column; it gets the width for it rather than squeezing the board
+    const pageWidth = useMatch('/dashboard') ? 1320 : 1080
     const nav = user ? NAV.filter((item) => !item.roles || item.roles.includes(user.role)) : []
 
     const handleSignOut = async () =>
@@ -73,7 +75,7 @@ export default function AppShell({ children })
                 component="header"
                 sx={{ bgcolor: 'background.paper', borderBottom: `1px solid ${tokens.rule}` }}
             >
-                <Box sx={{ maxWidth: 1080, mx: 'auto', px: { xs: 2, md: 4 }, height: 64, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Box sx={{ maxWidth: pageWidth, mx: 'auto', px: { xs: 2, md: 4 }, height: 64, display: 'flex', alignItems: 'center', gap: 4 }}>
                     <Typography
                         component={RouterLink}
                         to={homePath(user)}
@@ -126,7 +128,7 @@ export default function AppShell({ children })
                     </Box>
                 </Drawer>
             )}
-            <Box component="main" id="main" tabIndex={-1} sx={{ maxWidth: 1080, mx: 'auto', px: { xs: 2, md: 4 }, py: { xs: 3, md: 5 } }}>
+            <Box component="main" id="main" tabIndex={-1} sx={{ maxWidth: pageWidth, mx: 'auto', px: { xs: 2, md: 4 }, py: { xs: 3, md: 5 } }}>
                 {children}
             </Box>
         </Box>
