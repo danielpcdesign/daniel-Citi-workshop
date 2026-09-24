@@ -33,7 +33,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M11 | Visual workflow | Per-incident stepper and a status-grouped board | Not started |
 | M12 | Responsive and accessible UI | Mobile and desktop, consistent interaction states | Not started |
 | M13 | Test suites | To the coverage targets in [Testing](#testing) | In progress — backend: 80 tests pass, 100% coverage, 80% gate passes (`.venv/bin/pytest`, 2026-09-23, uncommitted), now covering the AD-12 `http.py` entry wrapper and AD-16 `log.py` formatter; mutation spot-check confirms tests fail when the code they cover is broken. Frontend (Vitest/RTL) and E2E (Cypress) not started |
-| M14 | Cloud deployment | Verified working end to end on AWS, not only in LocalStack | Backend deployed and verified through CloudFront (origin sealed, auth round trip, token header, cookie, migrations, admin seed). Frontend not yet deployed. Details: AGENTS.md → First cloud deploy |
+| M14 | Cloud deployment | Verified working end to end on AWS, not only in LocalStack | Backend and frontend both deployed and verified through CloudFront, same domain. Backend: origin sealed, auth round trip, token header, cookie, migrations, admin seed. Frontend (`./bin/deploy-frontend.sh`, 2026-09-24): `/` and deep links (`/tickets`, `/incidents/1`, `/report`) 200 HTML, assets 200, API 404/403 JSON (AD-12 envelope), refresh cookie 200, Cypress smoke test against the cloud URL passed. The full core-journey Cypress spec was **not** run in the cloud — its fixture users exist only locally. Details: AGENTS.md → First cloud deploy / Frontend cloud deploy — verification |
 
 **Ordering note.** M2 precedes everything because of one schema decision that cannot be retrofitted — see [The one irreversible decision](#the-one-irreversible-decision). M3 and M4 precede M5–M8 because retrofitting an identity into endpoints written without one is the single most expensive reordering available here, and the reasoning is in [Security](#security--what-is-and-is-not-enforced).
 
@@ -110,9 +110,12 @@ The repository lives inside the VDI, not on any local machine. Work happens ther
 source ~/.bashrc
 ./bin/start-dev.sh          # whole local stack
 ./bin/deploy-backend.sh     # Lambdas + infra
-./bin/deploy-frontend.sh    # S3 + CloudFront
+./bin/deploy-frontend.sh    # S3 + CloudFront (aws mode: build, sync --delete, invalidate /*)
+./bin/deploy-frontend.sh local  # LocalStack — skip the build, use start-dev.sh instead
 ./bin/generate-env.sh       # regenerate frontend/.env.local from Terraform outputs
 ```
+
+Deploy order: `./bin/deploy-backend.sh` first (Terraform outputs the API base URL the frontend build needs), then `./bin/deploy-frontend.sh`.
 
 `./bin/cleanup-environment.sh` destroys all deployed AWS resources and cannot be undone.
 
@@ -344,6 +347,8 @@ Found by reading the repository before writing any code. Recorded because each o
 - **`bin/start-dev.sh` locates `postgresql.conf` with an unprivileged `find`**, which cannot read `/etc/postgresql/<ver>/main/`, so its rebind-to-`0.0.0.0` step fails on a stock install. Done by hand once per VDI; see Environment.
 - **`frontend/eslint.config.js` imports `eslint-plugin-react-hooks` and `eslint-plugin-react-refresh`, but `package.json` installed neither**, so `npm run lint` crashed with a module-resolution error before linting anything. Fixed: both added as dev dependencies; lint passes.
 - **The repository's root README describes a team-management application.** That is generic workshop filler and not this assignment. Where it conflicts with the problem statement, the assignment wins.
+- **Frontend installs were not reproducible.** `frontend/package-lock.json` was gitignored, so every fresh machine re-resolved dependency versions instead of installing the ones last verified. **Fixed (2026-09-24):** the lock file is now tracked (`.gitignore` un-ignores only it), and `bin/start-dev.sh` runs `npm ci` when it is present, `npm install` otherwise.
+- **`infra/cloudfront.tf`'s distribution-wide `custom_error_response` broke both API errors and SPA deep links.** It rewrote every `404` to `200 /index.html`, including `/api/*` — so an API `404` came back as `200 text/html`, breaking the AD-12 error envelope — and it never actually fixed a deep link (`/tickets`, `/incidents/1`), because S3 behind the CloudFront OAC has no `ListBucket` permission and answers a missing key with `403`, not `404`. **Fixed (2026-09-24, commit `7de3cb3`):** the rule was removed and replaced with `aws_cloudfront_function.spa_rewrite` (`infra/spa-rewrite.js`, CloudFront Functions JS 2.0), a viewer-request function on the default S3 behavior only — it rewrites extension-less, non-`/api/*` paths to `/index.html`, so an unknown `/api/*` path still errors correctly. Cloud only (count-gated with the distribution); LocalStack is unaffected. Rejected alternatives: a `403 → index.html` rule (would also turn API `403`s into `200` HTML) and granting S3 `ListBucket` so the `404` rule fires (leaves API `404`s coming back as HTML).
 
 ## Testing
 

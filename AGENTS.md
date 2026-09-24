@@ -149,6 +149,14 @@ Facts that shape every backend decision, from `infra/lambda.tf`:
 - The distribution is created only outside LocalStack
   (`data.aws_caller_identity.this.id != "000000000000"`), so local dev needs a Vite proxy to
   reproduce the same-origin shape.
+- **SPA deep links and API 404s are handled separately (fixed 2026-09-24).** The scaffold's
+  distribution-wide `custom_error_response` (404 → 200 `/index.html`) applied to `/api/*` too,
+  so an API 404 came back `200 text/html` — breaking the AD-12 envelope — and never fired for
+  deep links anyway, since S3 behind the OAC answers a missing key with `403`, not `404`.
+  Replaced with `aws_cloudfront_function.spa_rewrite` (`infra/spa-rewrite.js`), a viewer-request
+  function on the default S3 behavior only: it rewrites extension-less, non-`/api/*` paths to
+  `/index.html`. Cloud only (count-gated with the distribution); LocalStack unaffected. See
+  README → Known defects.
 
 ## Repository layout
 
@@ -268,6 +276,11 @@ VITE_LAMBDA_URLS      # JSON map service -> Lambda Function URL
 - Validate before submit; errors beside the relevant field; block submit until valid;
   disable the form while in flight.
 - Hide or disable actions the current role cannot perform.
+
+**Reproducible installs (fixed 2026-09-24).** `frontend/package-lock.json` is now tracked
+(`.gitignore` un-ignores only that one lock file); `bin/start-dev.sh` runs `npm ci` when the
+lock exists, `npm install` otherwise. Previously the lock was gitignored outright and
+re-resolved on every fresh machine — different dependency versions on every clone.
 
 ## API contract
 
@@ -2070,6 +2083,24 @@ cluster and CloudFront distribution were pre-provisioned by the workshop (cluste
 | bcrypt cost 10 at 128 MB (M3) | Login: 6.5 s cold, **1.73 s warm**. **Decided:** `auth` alone doubled to 256 MB (not 512 — the user's call); cost stays 10. **Measured after:** warm login **0.87 s** (halved, as CPU scales with memory); first login after idle 18.7 s = cold start plus Aurora resume, absorbed by the 25 s timeout |
 | CloudWatch JSON lines (AD-16) | Clean, parseable; LocalStack's `END RequestId` concatenation is LocalStack-only |
 | `rawPath` decoding in AWS (AD-05) | Not observed; low impact (all path ids are numeric) |
+
+## Frontend cloud deploy — verification (2026-09-24)
+
+Deployed with `./bin/deploy-frontend.sh` (aws mode: refresh credentials, `npm run build`,
+`aws s3 sync --delete`, CloudFront invalidation of `/*`). Live on the same CloudFront domain
+as the API, `https://d2bwm7q2v18xxo.cloudfront.net`.
+
+| Check | Result |
+|---|---|
+| `/` and deep links (`/tickets`, `/incidents/1`, `/report`) | `200` HTML (AD-06/spa_rewrite fix above) |
+| Static assets | `200` |
+| API `404` | `404` JSON, AD-12 envelope (was `200` HTML before the CloudFront fix) |
+| API `403` | `403` JSON |
+| Refresh cookie | `200` |
+| Cypress smoke test (sign in as `live.cloud@acme.inc`, hard reload, deep-link visit, sign out) against the cloud URL | Passed |
+
+**Not run in the cloud:** the full core-journey Cypress spec — its admin/engineer/employee
+fixture users exist only in the local database. Cloud coverage is the smoke test above only.
 
 ## Known documentation discrepancies
 
