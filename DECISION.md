@@ -86,6 +86,9 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 | M9 search gaps | Ticket-number search in `q` added; date ranges and `reporter_id` skipped; unindexed `ILIKE` a stated scope cut (`pg_trgm` later) | Help-desk users often have only the number; the rest is not asked for | 2026-09-23 |
 | Read views for names | `incidents_read` / `ticket_notes_read` (migration 002); reads from views, writes and locks on base tables | Names without extra round-trips or ambiguous joins in every query | 2026-09-23 |
 | Reporter filter (E5) | `reporter_id` added to the incidents list, reversing the M9 skip | "My reports" for engineers and admins, who see more than their own | 2026-09-23 |
+| Auth Lambda memory | 256 MB for `auth` only (others 128) | bcrypt login took 1.7 s warm at 128 MB; doubled rather than quadrupled | 2026-09-23 |
+| Cookie delivery | Keep both the `cookies` field and `Set-Cookie` header | One code path for AWS and LocalStack, so LocalStack stays a working demo fallback; AWS's duplicate header is harmless | 2026-09-23 |
+| Aurora pausing | Keep `min_capacity = 0`; first request after idle waits ~15–20 s | No charge for idle capacity in a workshop; `connect_timeout=25` absorbs the resume | 2026-09-23 |
 | Integration test database | Database-backed backend tests run against the **dev database**, not a separate test database; each test gets a throwaway PostgreSQL schema (`test_<random>`) created/dropped by the `isolated_schema` fixture (`backend/conftest.py`), with code under test pointed at it via `PGOPTIONS=-c search_path=<schema>` | One PostgreSQL to stand up locally, not two; the schema-per-test isolation keeps writes out of `public` without touching production connection code | 2026-09-23 |
 
 ## Rules settled beneath a parent decision

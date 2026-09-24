@@ -8,7 +8,7 @@ module "lambda" {
   architectures   = [each.value.arch]
   handler         = each.value.handler
   runtime         = each.value.runtime
-  memory_size     = 128
+  memory_size     = each.key == "auth" ? 256 : 128 # bcrypt login cpu: 1.7 s at 128 MB (M3)
   timeout         = 300
   tracing_mode    = "PassThrough"
   build_in_docker = false
