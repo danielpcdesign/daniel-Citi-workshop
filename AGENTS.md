@@ -449,9 +449,22 @@ AD-09 and AD-17 point back to this list.
 
   Admin deletion is moderation; admins never edit someone else's words. Enforced by the
   shared authorization helper (AD-09), not inline in the handler.
-- **Still open, for M8:** whether an edit is visible (`edited_at` shown as "edited") —
-  recommended, since a silently rewritten note undermines the conversation as a record;
-  whether `Closed` read-only also blocks admin moderation of notes on closed incidents.
+- **Decided at M8 (2026-09-23):** edits are **visible** — `edited_at` is set and returned so
+  the UI can mark a note "edited"; a silently rewritten note could change the meaning of a
+  thread after it was answered. **Admins may soft-delete notes on `closed` incidents** — the
+  one exception to "closed is read-only", because moderation (personal data, abuse) does not
+  stop mattering when a ticket closes; authors cannot edit or delete on a closed incident.
+- **M8 details:** notes are created only as `comment` through the API (the other kinds come
+  from transitions and escalation); 5,000-character limit; a deleted note stays in the
+  list as a placeholder (`body: null`, `deleted_at`, `deleted_by`); history-backed kinds are
+  edited and deleted like any note (AD-17: the history row keeps the reason).
+- **Built 2026-09-23 (M8).** `backend/incidents/notes.py`, registered by `function.py` with
+  `register(router, load)` — the loader returns a typed `Incident` (or `404`), so notes reuse
+  the incident's visibility check and never depend on the incidents row layout or import
+  `function.py` (no circular import). Adding a note locks the incident, so a note cannot
+  slip in while another request closes it. 367 tests, 100% (`notes.py` included). Live:
+  reporter and engineer post 201, engineer editing the reporter's note 403, reporter edit
+  200 (marked edited), admin moderation delete 204, thread shows the placeholder.
 
 ### AD-02 · Shared-code packaging
 

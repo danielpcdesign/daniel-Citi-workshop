@@ -3,6 +3,7 @@ from typing import Literal
 from psycopg import Connection
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+import notes
 import policy
 import workflow
 from shared import listing, log
@@ -406,6 +407,10 @@ def delete(request: Request) -> tuple[int, None]:
         "UPDATE incidents SET deleted_at = now(), deleted_by = %s WHERE id = %s", (request.user.id, row[0])
     )
     return 204, None
+
+
+# the conversation on each incident (M8), checked through the same visibility as the incident itself (AD-01)
+notes.register(router, lambda conn, user, raw_id, lock=False: _incident(load(conn, user, raw_id, lock)))
 
 
 def handler(event=None, context=None):

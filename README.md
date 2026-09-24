@@ -27,7 +27,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | Done locally — report, list (filters, paging, triage sort), detail with per-caller actions, edit, soft delete; status changes enforced by the AD-17 table with full history; assignment; escalation requests and admin decisions. 289 tests (100%), verified live on LocalStack |
 | M6 | Facilities CRUD | Building → floor → seat | Done locally — admins create, rename, and archive at every level (archive cascades; archived locations are hidden); everyone reads; duplicate names are a friendly 409. 323 tests (100%), verified live |
 | M7 | Engineer profiles + assignment | Profiles linked to accounts, ticket assignment | Done locally — admins see every engineer's availability and live workload (sortable by capacity); engineers toggle their own availability; unavailable engineers get no new work. Assignment itself shipped in M5. 346 tests (100%), verified live |
-| M8 | Ticket notes | Threaded communication on an incident | Not started |
+| M8 | Ticket notes | Threaded communication on an incident | Done locally — one chronological conversation per incident; blocked, reassignment, and escalation reasons appear in it; authors edit (marked edited) and delete their own; admins moderate, even on closed tickets. 367 tests (100%), verified live |
 | M9 | Search, filter, pagination | Server-side, shared across all three persona views | Not started |
 | M10 | Dashboards and reporting | Per-persona; counts by status/priority/assignee, hotspots, MTTA/MTTR | Not started |
 | M11 | Visual workflow | Per-incident stepper and a status-grouped board | Not started |
@@ -443,6 +443,17 @@ Archived locations are hidden everywhere (`404`) and cannot be restored; floors 
 | `GET` | `/api/engineers/me` | engineer | own profile and workload |
 | `GET` | `/api/engineers/{id}` | admin | one engineer |
 | `PUT` | `/api/engineers/{id}/availability` | admin, or that engineer | `{is_available}`; current tickets stay; unavailable engineers cannot be assigned new ones |
+
+### Note endpoints (M8)
+
+Everyone who can see the incident can read and write its conversation (a `404` otherwise). A `closed` incident is read-only, except that an admin may still remove a note.
+
+| Method | Path | Who | Result |
+|---|---|---|---|
+| `GET` | `/api/incidents/{id}/notes?page=&limit=` | can see the incident | oldest first; removed notes stay as placeholders with `body: null` |
+| `POST` | `/api/incidents/{id}/notes` | can see it, not closed | `{body}` (≤ 5,000 chars) → `201` comment |
+| `PUT` | `/api/incidents/{id}/notes/{note_id}` | the author, not closed | `{body}`; sets `edited_at` |
+| `DELETE` | `/api/incidents/{id}/notes/{note_id}` | the author, or an admin (even when closed) | `204` soft delete |
 
 ### Live checks leave permanent rows
 

@@ -505,3 +505,136 @@ def test_an_engineer_without_a_profile_is_refused(svc, world):
     world["orphan"] = orphan
     incident_id = report(svc, world)[1]["id"]
     assert give(svc, world, incident_id, engineer="orphan")[0] == 400
+
+
+# --- notes (M8, AD-01 note rules) -----------------------------------------------------------------
+
+def note(svc, world, who, incident_id, body="Is anyone on this?"):
+    return call(svc, world, who, "POST", f"/{incident_id}/notes", {"body": body})
+
+
+def notes_of(svc, world, who, incident_id, query=""):
+    return call(svc, world, who, "GET", f"/{incident_id}/notes", query=query)
+
+
+def test_reporter_and_assigned_engineer_hold_one_conversation(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    note(svc, world, "alice", incident_id, "It is getting worse")
+    note(svc, world, "eve", incident_id, "On my way")
+    status, body = notes_of(svc, world, "alice", incident_id)
+    # oldest first: one chronological thread, not replies
+    assert [(n["author_id"], n["kind"], n["body"]) for n in body["items"]] == [
+        (world["alice"], "comment", "It is getting worse"), (world["eve"], "comment", "On my way")]
+    assert (status, body["total"]) == (200, 2)
+
+
+def test_system_notes_share_the_thread(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    move(svc, world, "eve", incident_id, "in_progress")
+    move(svc, world, "eve", incident_id, "blocked", "waiting on the landlord")
+    note(svc, world, "alice", incident_id, "How long?")
+    kinds = [n["kind"] for n in notes_of(svc, world, "alice", incident_id)[1]["items"]]
+    assert kinds == ["blocked", "comment"]
+
+
+def test_someone_elses_conversation_is_404(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    assert notes_of(svc, world, "bob", incident_id)[0] == 404
+    assert note(svc, world, "bob", incident_id)[0] == 404
+
+
+@pytest.mark.parametrize("status_before", ["unassigned", "open", "blocked", "resolved"])
+def test_notes_are_writable_until_closed(svc, world, status_before):
+    incident_id = report(svc, world)[1]["id"]
+    if status_before != "unassigned":
+        assign(world, incident_id, status=status_before)
+    assert note(svc, world, "alice", incident_id)[0] == 201
+
+
+def test_a_closed_incident_is_read_only(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    note_id = note(svc, world, "alice", incident_id)[1]["id"]
+    assign(world, incident_id, status="closed")
+    assert note(svc, world, "alice", incident_id)[1]["error"]["message"] == "a closed incident is read-only"
+    assert call(svc, world, "alice", "PUT", f"/{incident_id}/notes/{note_id}", {"body": "edit"})[0] == 403
+    assert call(svc, world, "alice", "DELETE", f"/{incident_id}/notes/{note_id}")[0] == 403
+    # the one exception: admin moderation outlives the ticket (M8)
+    assert call(svc, world, "ada", "DELETE", f"/{incident_id}/notes/{note_id}")[0] == 204
+
+
+def test_only_the_author_edits_and_the_edit_is_visible(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    note_id = note(svc, world, "alice", incident_id, "tap drips")[1]["id"]
+    assert call(svc, world, "ada", "PUT", f"/{incident_id}/notes/{note_id}", {"body": "rewritten"})[0] == 403
+    status, body = call(svc, world, "alice", "PUT", f"/{incident_id}/notes/{note_id}", {"body": "tap pours"})
+    assert (status, body["body"]) == (200, "tap pours")
+    # edited_at makes a rewrite visible after others replied (M8)
+    assert body["edited_at"] is not None
+
+
+def test_a_new_note_is_not_marked_edited(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    assert note(svc, world, "alice", incident_id)[1]["edited_at"] is None
+
+
+def test_author_or_admin_deletes_and_the_thread_keeps_a_placeholder(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    mine = note(svc, world, "alice", incident_id, "phone me on 555-0100")[1]["id"]
+    theirs = note(svc, world, "eve", incident_id, "noted")[1]["id"]
+    assert call(svc, world, "alice", "DELETE", f"/{incident_id}/notes/{theirs}")[0] == 403
+    assert call(svc, world, "alice", "DELETE", f"/{incident_id}/notes/{mine}")[0] == 204
+    assert call(svc, world, "ada", "DELETE", f"/{incident_id}/notes/{theirs}")[0] == 204
+    items = notes_of(svc, world, "alice", incident_id)[1]["items"]
+    assert [(n["body"], n["deleted_by"]) for n in items] == [(None, world["alice"]), (None, world["ada"])]
+    # soft delete: the text is hidden from the api, but the row survives
+    assert sql("SELECT count(*) FROM ticket_notes WHERE body = 'phone me on 555-0100'") == [(1,)]
+
+
+def test_a_deleted_note_cannot_be_edited_or_deleted_again(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    note_id = note(svc, world, "alice", incident_id)[1]["id"]
+    call(svc, world, "alice", "DELETE", f"/{incident_id}/notes/{note_id}")
+    assert call(svc, world, "alice", "PUT", f"/{incident_id}/notes/{note_id}", {"body": "back"})[0] == 404
+    assert call(svc, world, "alice", "DELETE", f"/{incident_id}/notes/{note_id}")[0] == 404
+
+
+def test_a_blocked_reason_note_is_edited_like_any_note_but_history_keeps_the_record(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)
+    move(svc, world, "eve", incident_id, "in_progress")
+    move(svc, world, "eve", incident_id, "blocked", "part on order")
+    note_id = notes_of(svc, world, "eve", incident_id)[1]["items"][0]["id"]
+    call(svc, world, "eve", "DELETE", f"/{incident_id}/notes/{note_id}")
+    # AD-17: the history row is the record, the note only the notification
+    assert sql("SELECT reason FROM incident_status_history WHERE to_status = 'blocked'") == [("part on order",)]
+
+
+@pytest.mark.parametrize("body", [{"body": "  "}, {"body": "x" * 5001}, {}, {"body": "ok", "kind": "blocked"}])
+def test_note_body_validation(svc, world, body):
+    incident_id = report(svc, world)[1]["id"]
+    status, _ = call(svc, world, "alice", "POST", f"/{incident_id}/notes", body)
+    assert status == 400
+
+
+@pytest.mark.parametrize("note_id", ["999999", "abc"])
+def test_unknown_note_is_404(svc, world, note_id):
+    incident_id = report(svc, world)[1]["id"]
+    assert call(svc, world, "alice", "PUT", f"/{incident_id}/notes/{note_id}", {"body": "x"})[0] == 404
+
+
+def test_a_note_id_from_another_incident_is_404(svc, world):
+    first = report(svc, world)[1]["id"]
+    second = report(svc, world)[1]["id"]
+    note_id = note(svc, world, "alice", first)[1]["id"]
+    assert call(svc, world, "alice", "PUT", f"/{second}/notes/{note_id}", {"body": "x"})[0] == 404
+
+
+def test_notes_page(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    for i in range(3):
+        note(svc, world, "alice", incident_id, f"n{i}")
+    _, body = notes_of(svc, world, "alice", incident_id, "limit=2&page=2")
+    assert (body["total"], [n["body"] for n in body["items"]]) == (3, ["n2"])
