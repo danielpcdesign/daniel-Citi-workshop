@@ -122,12 +122,8 @@ Fixed rules recorded under a parent. AD-09, AD-12, and AD-17 have since closed; 
 | AD-12 | `auth`'s public health route runs `SELECT 1` and returns only `{"service", "database"}` | The M1 handler ran `SELECT version()` and returned the full PostgreSQL version plus a `headers_received` echo on a public route — server fingerprinting | 2026-09-23 |
 | AD-18 | Admin/engineer dashboard board issues six list calls (`status=<s>&limit=6`, one shared correlation id), not one paged list | A single page could land entirely on one status, leaving no true per-column count for "+N more not shown" | 2026-09-24 |
 | AD-14 | Dashboard summary/attention/board poll every 30 s, paused when hidden; timings/hotspots load once plus a Refresh button (`usePolling` on-demand mode, `intervalMs = null`) | Timings and hotspots scan the full status history and change slowly; polling them every 30 s buys nothing | 2026-09-24 |
+| AD-19 | Engineer dashboard board shows the engineer's full visibility: tickets assigned to them **or** reported by them (no `assignee_id` filter) | Same scope as the server's visibility rule and the summary counts beside it, so board and counts always agree; an engineer's own reports stay in view | 2026-09-24 |
 
 ## Still open
 
-Every AD in the register is decided. One sub-question beneath an already-decided AD is open:
-
-- **Engineer dashboard board scope (beneath AD-19).** Raised 2026-09-24, building the M11
-  dashboard: should the engineer's status board show only tickets **assigned to them**
-  (`assignee_id` filter), instead of the assigned-or-reported scope it currently inherits
-  from AD-19 / Role inheritance? Not settled — awaiting the user's call.
+None. Every AD in the register is decided, and so is the one sub-question raised since (engineer board scope, below).

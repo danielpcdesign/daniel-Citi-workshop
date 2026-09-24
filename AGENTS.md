@@ -1670,7 +1670,8 @@ An explicit MVP capability, and the most under-specified one.
   `Blocked` as an error state on the current step (MUI `Step` `error`), with the reason
   from the status history — not as a fourth box between `In Progress` and `Resolved`.
 - **Not settled here:** the drag-and-drop library (AD-10, and only if drag is built); which
-  columns or filters the Engineer's board shows versus the Admin's (AD-19).
+  columns or filters the Engineer's board shows versus the Admin's (AD-19) — since decided: the
+  engineer's full visibility, assigned or reported (2026-09-24).
 - **Lands at:** M11.
 
 #### Built 2026-09-24 (M11) — dashboard frontend
@@ -1717,10 +1718,8 @@ An explicit MVP capability, and the most under-specified one.
      `floor_name` from the query.
   2. No admin all-incidents list page exists, so a board column's "+N more not shown" is
      text, not a link.
-- **Open question, not settled here — needs the user's call:** should the engineer's board
-  show only tickets assigned to them (an `assignee_id` filter), rather than the current
-  assigned-or-reported scope it inherits from AD-19/Role inheritance? Not decided; do not
-  narrow the query without confirmation.
+- **Engineer board scope — DECIDED 2026-09-24 (user):** assigned-or-reported, the engineer's full
+  server visibility; no `assignee_id` filter. The board and the summary counts beside it cover the same tickets.
 
 ### AD-19 · Dashboard and reporting strategy
 
