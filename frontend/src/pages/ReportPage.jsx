@@ -15,6 +15,7 @@ import { fieldError, unplacedError } from '../utils/errors.js'
 
 const FIELDS = ['title', 'description', 'category', 'priority', 'building_id', 'floor_id', 'seat_id']
 const TITLE_MAX = 200
+const DESCRIPTION_MAX = 5000
 
 const EMPTY = {
     title: '',
@@ -87,7 +88,8 @@ export default function ReportPage()
                         value={form.description}
                         onChange={update('description')}
                         error={Boolean(errors.description)}
-                        helperText={errors.description || 'What you noticed, since when, and anything already tried.'}
+                        helperText={errors.description || `What you noticed, since when, and anything already tried. ${form.description.length}/${DESCRIPTION_MAX}`}
+                        slotProps={{ htmlInput: { maxLength: DESCRIPTION_MAX } }}
                         multiline
                         minRows={4}
                         required

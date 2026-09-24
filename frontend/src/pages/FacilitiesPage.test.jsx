@@ -91,6 +91,7 @@ describe('FacilitiesPage', () =>
         renderFacilities()
         await screen.findByRole('list', { name: 'Buildings' })
         const box = screen.getByRole('textbox', { name: 'New building' })
+        expect(box).toHaveAttribute('maxLength', '100')
         expect(screen.getByRole('button', { name: 'Add building' })).toBeDisabled()
         await user.type(box, '  Zz Test Building ')
         await user.click(screen.getByRole('button', { name: 'Add building' }))

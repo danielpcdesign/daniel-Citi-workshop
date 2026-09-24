@@ -11,6 +11,8 @@ import { useAuth } from '../hooks/useAuth.js'
 import { fieldError, unplacedError } from '../utils/errors.js'
 
 const FIELDS = ['full_name', 'email', 'password']
+// the server's limits, so nobody can type past them; the server still decides (AD-12)
+const FULL_NAME_MAX = 100
 
 export default function RegisterPage()
 {
@@ -54,7 +56,9 @@ export default function RegisterPage()
                         value={form.fullName}
                         onChange={update('fullName')}
                         error={Boolean(fieldError(error, 'full_name'))}
-                        helperText={fieldError(error, 'full_name')}
+                        helperText={fieldError(error, 'full_name') || 'Your name as colleagues know it'}
+                        // length hint only: which characters a name may hold is the server's rule, not repeated here
+                        slotProps={{ htmlInput: { maxLength: FULL_NAME_MAX } }}
                         required
                         disabled={busy}
                     />

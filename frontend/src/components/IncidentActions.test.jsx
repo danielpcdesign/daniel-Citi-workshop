@@ -61,7 +61,11 @@ describe('IncidentActions', () =>
         const dialog = await screen.findByRole('dialog', { name: 'What is blocking this ticket?' })
         const confirm = within(dialog).getByRole('button', { name: 'Mark as blocked' })
         expect(confirm).toBeDisabled()
+        // the server's reason limit, with a running count
+        expect(within(dialog).getByRole('textbox')).toHaveAttribute('maxLength', '1000')
+        expect(dialog).toHaveTextContent('0/1000')
         await user.type(within(dialog).getByRole('textbox'), '  Waiting for parts  ')
+        expect(dialog).toHaveTextContent('21/1000')
         await user.click(confirm)
         expect(transitionIncident).toHaveBeenCalledWith(12, 'blocked', 'Waiting for parts')
         expect(onChanged).toHaveBeenCalled()

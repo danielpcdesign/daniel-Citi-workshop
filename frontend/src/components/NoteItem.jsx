@@ -9,6 +9,9 @@ import { fmtDateTime } from '../utils/format.js'
 import { fieldError } from '../utils/errors.js'
 import { tokens } from '../theme.js'
 
+// same limit as a new note (NoteThread)
+const NOTE_MAX = 5000
+
 const ROLE_LABEL = { engineer: 'Engineer', admin: 'Facility admin' }
 
 // notes posted by a workflow action read as events in the thread, not as chat (AD-17, AD-20)
@@ -97,9 +100,9 @@ export default function NoteItem({ note, canEdit, canDelete, onEdit, onDelete })
                             value={draft}
                             onChange={(event) => setDraft(event.target.value)}
                             error={Boolean(fieldError(error, 'body'))}
-                            helperText={fieldError(error, 'body')}
+                            helperText={fieldError(error, 'body') || `${draft.length}/${NOTE_MAX}`}
                             disabled={busy}
-                            slotProps={{ htmlInput: { 'aria-label': 'Edit note', maxLength: 5000 } }}
+                            slotProps={{ htmlInput: { 'aria-label': 'Edit note', maxLength: NOTE_MAX } }}
                         />
                         <Stack direction="row" spacing={1}>
                             <Button size="small" variant="contained" disabled={busy || !draft.trim()} onClick={() => run(() => onEdit(draft.trim()))}>

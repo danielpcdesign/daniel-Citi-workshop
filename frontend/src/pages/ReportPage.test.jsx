@@ -113,6 +113,28 @@ describe('ReportPage', () =>
         expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
+    it('caps title and details at the server\'s lengths, counts the details, and places a control-character refusal', async () =>
+    {
+        const user = userEvent.setup()
+        createIncident.mockRejectedValue(new ApiError({
+            status: 400,
+            code: 'validation_failed',
+            message: 'invalid',
+            fields: { title: 'must not contain control characters' },
+        }))
+        renderPage(<ReportPage />)
+        const title = screen.getByLabelText(/What is the problem/)
+        const details = screen.getByLabelText(/Details/)
+        expect(title).toHaveAttribute('maxLength', '200')
+        expect(details).toHaveAttribute('maxLength', '5000')
+        expect(screen.getByText(/0\/5000/)).toBeInTheDocument()
+        await fillRequired(user)
+        expect(screen.getByText(new RegExp(`${details.value.length}/5000`))).toBeInTheDocument()
+        await user.click(screen.getByRole('button', { name: 'Send report' }))
+        expect(await screen.findByText('Must not contain control characters')).toBeInTheDocument()
+        expect(title).toHaveAttribute('aria-invalid', 'true')
+    })
+
     it('shows an unexpected failure with its reference', async () =>
     {
         const user = userEvent.setup()

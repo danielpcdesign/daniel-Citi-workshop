@@ -80,6 +80,24 @@ describe('RegisterPage', () =>
         expect(register).toHaveBeenCalledWith({ fullName: 'Erin', email: 'erin@gmail.com', password: 'short' })
     })
 
+    it('caps the name at the server\'s length and shows the server\'s name rule beside it', async () =>
+    {
+        const user = userEvent.setup()
+        const register = vi.fn().mockRejectedValue(new ApiError({
+            status: 400,
+            code: 'validation_failed',
+            message: 'invalid',
+            fields: { full_name: 'Value error, must contain at least one letter' },
+        }))
+        renderPage(<RegisterPage />, { auth: fakeAuth({ user: null, register }) })
+        const name = screen.getByLabelText(/Full name/)
+        expect(name).toHaveAttribute('maxLength', '100')
+        expect(screen.getByText('Your name as colleagues know it')).toBeInTheDocument()
+        await fill(user)
+        expect(await screen.findByText('Must contain at least one letter')).toBeInTheDocument()
+        expect(name).toHaveAttribute('aria-invalid', 'true')
+    })
+
     it('explains a duplicate email beside the email input', async () =>
     {
         const user = userEvent.setup()

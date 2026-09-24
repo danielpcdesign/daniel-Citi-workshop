@@ -198,6 +198,7 @@ describe('Dashboard lookup tool', () =>
         expect(within(rows[0]).getByRole('link', { name: 'Open INC-12 Kitchen tap leaking' })).toHaveAttribute('href', '/incidents/12')
     })
 
+    // eight selects and a debounce: slow under coverage instrumentation, so it gets more than the default 5 s
     it('sends each filter, the search text, the sort, and the page as server-side params', async () =>
     {
         const user = userEvent.setup()
@@ -243,7 +244,7 @@ describe('Dashboard lookup tool', () =>
         await user.click(screen.getByRole('button', { name: 'Clear filters' }))
         await waitFor(() => expect(listIncidents).toHaveBeenLastCalledWith({ ...DEFAULT_QUERY, sort: 'created_at' }))
         expect(screen.getByRole('button', { name: 'Clear filters' })).toBeDisabled()
-    })
+    }, 15000)
 
     it('hides the engineer filter from an engineer and never loads the engineer list', async () =>
     {

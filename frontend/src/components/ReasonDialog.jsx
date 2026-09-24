@@ -9,6 +9,9 @@ import TextField from '@mui/material/TextField'
 import ErrorNotice from './ErrorNotice.jsx'
 import { fieldError, unplacedError } from '../utils/errors.js'
 
+// the server's limit for transition and escalation reasons (AD-12)
+export const REASON_MAX = 1000
+
 // one dialog for every action that carries a reason; the reason is posted to the conversation by the server
 export default function ReasonDialog({ open, title, prompt, label, confirmLabel, required, onConfirm, onClose })
 {
@@ -61,7 +64,8 @@ export default function ReasonDialog({ open, title, prompt, label, confirmLabel,
                         value={reason}
                         onChange={(event) => setReason(event.target.value)}
                         error={Boolean(fieldError(error, 'reason'))}
-                        helperText={fieldError(error, 'reason') || (required ? 'Everyone on the ticket will see this.' : 'Optional.')}
+                        helperText={fieldError(error, 'reason') || `${required ? 'Everyone on the ticket will see this.' : 'Optional.'} ${reason.length}/${REASON_MAX}`}
+                        slotProps={{ htmlInput: { maxLength: REASON_MAX } }}
                         required={required}
                         disabled={busy}
                         sx={{ mt: 1 }}

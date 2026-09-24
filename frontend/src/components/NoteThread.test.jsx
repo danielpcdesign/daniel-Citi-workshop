@@ -143,6 +143,8 @@ describe('NoteThread', () =>
         await screen.findByRole('list', { name: 'Notes' })
         await user.click(within(items()[0]).getByRole('button', { name: 'Edit' }))
         const box = screen.getByRole('textbox', { name: 'Edit note' })
+        expect(box).toHaveAttribute('maxLength', '5000')
+        expect(screen.getByText(`${box.value.length}/5000`)).toBeInTheDocument()
         await user.clear(box)
         await user.type(box, 'Now a steady leak')
         await user.click(screen.getByRole('button', { name: 'Save' }))
