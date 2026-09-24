@@ -246,7 +246,14 @@ def _filters(query: dict[str, list[str]]) -> tuple[list[str], dict]:
         params[name] = int(value)
     search = (listing.first(query, "q") or "").strip()
     if search:
-        clauses.append("(title ILIKE %(q)s OR description ILIKE %(q)s)")
+        text = "title ILIKE %(q)s OR description ILIKE %(q)s"
+        # a bare ticket number ("42" or "#42") also finds that incident; visibility still applies (M9)
+        number = search.removeprefix("#")
+        if number.isdigit():
+            clauses.append(f"(id = %(q_id)s OR {text})")
+            params["q_id"] = int(number)
+        else:
+            clauses.append(f"({text})")
         # % and _ are wildcards in LIKE: escape them so a search for "50%" means the text "50%"
         params["q"] = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     if errors:

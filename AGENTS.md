@@ -1372,6 +1372,14 @@ A required feature with no specified design.
   longest-waiting ticket tops a triage list.
 - **Applies to every list endpoint**, including `GET /api/auth/users`, which drops its
   provisional 50-row cap.
+- **M9 audit (2026-09-23):** every list endpoint (incidents, notes, the three facility
+  lists, engineers, users) runs on `_shared/listing.py`; "shared across all three persona
+  views" is the one incidents list, with personas as filter presets over SQL visibility.
+  **Added:** a purely numeric `q` (optionally `#42`) also matches the incident id, on top
+  of the text search, under the same visibility. **Skipped by decision:** date-range
+  filters (not deferred — a new decision if AD-19 needs them) and a `reporter_id` filter
+  (nothing asks for it). **Scope cut:** `q` uses `ILIKE` without an index — a full scan,
+  fine at workshop scale; `pg_trgm` trigram indexes are the upgrade path.
 
 ### AD-14 · Real-time and async scope
 

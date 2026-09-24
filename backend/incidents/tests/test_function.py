@@ -638,3 +638,25 @@ def test_notes_page(svc, world):
         note(svc, world, "alice", incident_id, f"n{i}")
     _, body = notes_of(svc, world, "alice", incident_id, "limit=2&page=2")
     assert (body["total"], [n["body"] for n in body["items"]]) == (3, ["n2"])
+
+
+# --- search by ticket number (M9) -----------------------------------------------------------------
+
+@pytest.mark.parametrize("form", ["{id}", "#{id}", " {id} "])
+def test_a_ticket_number_finds_the_ticket(svc, world, form):
+    wanted = report(svc, world, title="Door jammed")[1]["id"]
+    report(svc, world, title="Window stuck")
+    _, body = call(svc, world, "ada", "GET", query=f"q={form.format(id=wanted).replace('#', '%23')}")
+    assert [i["id"] for i in body["items"]] == [wanted]
+
+
+def test_a_number_still_matches_text_too(svc, world):
+    by_text = report(svc, world, title="Printer 9000 offline")[1]["id"]
+    _, body = call(svc, world, "ada", "GET", query="q=9000")
+    assert by_text in [i["id"] for i in body["items"]]
+
+
+def test_searching_someone_elses_number_finds_nothing(svc, world):
+    alices = report(svc, world, who="alice")[1]["id"]
+    _, body = call(svc, world, "bob", "GET", query=f"q={alices}")
+    assert body["total"] == 0

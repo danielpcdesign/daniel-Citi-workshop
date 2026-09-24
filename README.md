@@ -28,7 +28,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M6 | Facilities CRUD | Building → floor → seat | Done locally — admins create, rename, and archive at every level (archive cascades; archived locations are hidden); everyone reads; duplicate names are a friendly 409. 323 tests (100%), verified live |
 | M7 | Engineer profiles + assignment | Profiles linked to accounts, ticket assignment | Done locally — admins see every engineer's availability and live workload (sortable by capacity); engineers toggle their own availability; unavailable engineers get no new work. Assignment itself shipped in M5. 346 tests (100%), verified live |
 | M8 | Ticket notes | Threaded communication on an incident | Done locally — one chronological conversation per incident; blocked, reassignment, and escalation reasons appear in it; authors edit (marked edited) and delete their own; admins moderate, even on closed tickets. 367 tests (100%), verified live |
-| M9 | Search, filter, pagination | Server-side, shared across all three persona views | Not started |
+| M9 | Search, filter, pagination | Server-side, shared across all three persona views | Done locally — every list shares one paging / sort / envelope implementation; incidents filter by status, priority, category, location, assignee, escalation, and text or ticket number, with each persona seeing only their slice. 372 tests (100%) |
 | M10 | Dashboards and reporting | Per-persona; counts by status/priority/assignee, hotspots, MTTA/MTTR | Not started |
 | M11 | Visual workflow | Per-incident stepper and a status-grouped board | Not started |
 | M12 | Responsive and accessible UI | Mobile and desktop, consistent interaction states | Not started |
@@ -478,6 +478,7 @@ Recorded so the gaps are on the record rather than implied by silence. Each is a
 - **Custom CloudWatch metrics.** Lambda's built-in metrics (invocations, errors, duration, throttles) plus Logs Insights queries over the JSON logs answer every operational question the app has. Embedded Metric Format would add metrics without new infrastructure, but nothing requires it yet (AD-16).
 - **Restoring archived locations.** Archiving is final in the MVP: a restored building could collide with a newer one of the same name, and resolving that needs rules nobody asked for. An admin can create the location again (M6).
 - **Engineer specialties.** Engineers carry availability but not the categories they handle. No required question depends on it, and matching engineers to categories would need its own rules and a second migration (M7).
+- **Indexed text search.** `q` searches with `ILIKE`, which scans the table. At workshop scale that is instant; at real volume a `pg_trgm` trigram index is the upgrade path (M9).
 - **Seat occupants.** Seats are places an incident happens, not places people are assigned to — the brief never maps people to seats, and users carry no `seat_id`. Modelling occupancy would add a second meaning to every seat for no question the app must answer (AD-22).
 
 ## Roadmap
