@@ -1761,9 +1761,10 @@ they show a call was made, not what changed.
 
 Left sticky nav on desktop; a sideways-scrolling row pinned to the top on phones. Highlights
 the section in view via `IntersectionObserver`. Entries: Needs attention / Right now, Tickets
-by status, How fast tickets move, Where problems occur, Who's available (admin), and Lookup
-tool with History nested under it. Engineers see only Right now, Tickets by status, and
-Lookup > History.
+by status, How fast tickets move, Where problems occur, and Lookup tool with History nested
+under it. Engineers see only Right now, Tickets by status, and Lookup > History.
+**"Who's available" no longer lives here** — moved to `/engineers` on commit `d9907d6`, see
+below.
 
 - **Lookup:** collapsed by default and not polled. Runs `GET /api/incidents` server-side with
   `q` (300 ms debounce), multi-status, priority, category, building, engineer (admin only),
@@ -1797,6 +1798,46 @@ across them?" and **covers "create engineer profiles" in the UI.**
   promoting back does not return the tickets; they must be reassigned by hand.
 - **Verified 2026-09-24:** 156 Vitest tests pass, 99.48% statements / 95.82% branches; lint
   and build clean; browser-checked locally at 1280 px and 375 px; deployed to CloudFront.
+- **Superseded 2026-09-24 (commit `d9907d6`), see below:** this section and its dashboard
+  side-nav entry moved off `/dashboard` onto a standalone `/engineers` page.
+
+#### Built 2026-09-24 (M11) — Engineers page in the top nav; read-only engineer profile (commit `d9907d6`)
+
+"Who's available" moved off `/dashboard` — the section and its side-nav entry are removed,
+so the dashboard side nav returns to Needs attention / Right now, Tickets by status, How
+fast tickets move, Where problems occur, and Lookup tool > History (as above). It now lives
+on an admin-only `/engineers` page, linked from the **top** `AppShell` nav as "Engineers"
+(admin only) — same table, availability switch, Make engineer, and Demote with confirmation
+as `bc87575` built, just relocated. Non-admins opening `/engineers` or `/engineers/:id` are
+redirected to their role's home (`RequireAuth roles={['admin']}`, `frontend/src/App.jsx`).
+
+**New `/engineers/:id`** — a **read-only** view of one engineer's work. The user's choice
+over impersonation: the admin stays the admin, the audit trail stays intact, and every
+action (assign, transition, note) happens on the incident page, as the admin. Shows:
+
+- a banner "Viewing X's work (read-only)";
+- a header from `GET /api/engineers/{id}` with the same `AvailabilitySwitch` component used
+  on the table;
+- a board of their **assigned** tickets — `GET /api/incidents?assignee_id=<id>&status=<s>`,
+  one request per status, no `Unassigned` column (an assigned ticket cannot be unassigned);
+- counts derived from the column totals — Active = open + in progress + blocked, matching
+  the backend's `ACTIVE` grouping;
+- a separate "Reported by them" list (`reporter_id=<id>`, latest 5).
+
+Unknown or non-engineer `id` renders a 404 message; covered by tests.
+
+**Declined: a `GET /api/engineers/{id}/dashboard` endpoint.** Proposed to compute the
+engineer's exact visibility (assigned **or** reported, matching their own dashboard's
+board — see the AD-19 engineer-board-scope decision above) server-side in one call. The user
+declined a new backend endpoint the day before the demo — frontend-only. **Consequence,
+stated on the page:** the profile is not an exact copy of the engineer's own dashboard,
+because the list API can filter by assignee or by reporter, but not OR the two, so the
+"assigned or reported" set the engineer would see themselves is shown here as two separate
+lists instead of one combined visibility.
+
+**Verified 2026-09-24:** 173 Vitest tests pass, 99.5% statements / 95.77% branches; lint and
+build clean; browser-checked locally at 1280 px and 375 px (Marcus Webb: 4 active, matching
+the header); deployed to CloudFront.
 
 ### AD-19 · Dashboard and reporting strategy
 
