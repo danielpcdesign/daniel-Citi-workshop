@@ -103,7 +103,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-16 | Logging | **JSON lines from a stdlib formatter in `_shared/log.py`; one access line per request (route pattern, status, duration, ids); UUID-validated `X-Correlation-Id` echoed and logged, falling back to `request_id`; never log tokens, cookies, secrets, or bodies; no custom metrics.** |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
 | AD-18 | Visual workflow representation | **MUI `Stepper` on the incident detail view plus a status-grouped board on the Admin/Engineer dashboard.** Drag-to-transition only once AD-17 is enforced server-side. |
-| AD-19 | Dashboards | **`reports` service: `/summary` (any role, visibility-scoped), `/hotspots`, `/timings`, `/attention` (admin); SQL aggregates; `status` filter instead of a time window; time to assign, time to acknowledge (first `open → in_progress`), and time to resolve, all from history and measured from creation; "informed" pinned for the frontend; no caching.** |
+| AD-19 | Dashboards | **`reports` service: `/summary` (any role, visibility-scoped), `/hotspots`, `/timings`, `/attention` (admin); `/flow` (admin, hourly cumulative-flow snapshots, added 2026-09-24 post-demo — see below); SQL aggregates; `status` filter instead of a time window; time to assign, time to acknowledge (first `open → in_progress`), and time to resolve, all from history and measured from creation; "informed" pinned for the frontend; no caching.** |
 | AD-20 | Priority and escalation | **`Low/Medium/High/Critical`; `requested_priority` (employee, immutable) + `priority` (admin-set). Escalation = employee request an admin grants or declines, held in one `escalation_status` field on `incidents`; reason required and posted as a note; latest request only; no automatic effect; pending requests shown on the admin dashboard via polling.** |
 | AD-21 | Registration and roles | **Self-registration creates Employees only** (exact `acme.inc` domain match, server-side; no email verification). Admins promote users to Engineer (by creating the profile) or Admin. First admin seeded by `_migrate` from Terraform variables. `users.role` + one-to-one `engineer_profiles`. Demotion auto-unassigns active tickets. |
 | AD-22 | Facility hierarchy | **Three tables** (`buildings`, `floors`, `seats`); incident has required `building_id`, optional `floor_id`, optional `seat_id` (needs a floor), kept consistent by composite FKs. Soft delete via `archived_at`. No seat occupants. |
@@ -1847,6 +1847,36 @@ lists instead of one combined visibility.
 build clean; browser-checked locally at 1280 px and 375 px (Marcus Webb: 4 active, matching
 the header); deployed to CloudFront.
 
+#### Built 2026-09-24 (post-demo) — clickable "Right now" figures; admin Facilities page; cumulative flow diagram (commit `71c9f23`)
+
+- **Clickable summary figures.** Each figure on the dashboard's "Right now" plate opens a
+  drawer (right side on desktop, bottom sheet on phones) listing the matching tickets — reusing
+  the existing incidents-list filters (AD-13), not a new endpoint: blocked → `status=blocked`,
+  escalation → `escalation_status=pending`, waiting → `status=unassigned`, open work → the four
+  active/unassigned statuses, fixed-waiting → `status=resolved`. 20 per page; focus returns to
+  the figure on close.
+- **Admin `/facilities` page**, linked in the top nav after Engineers: a building → floor → seat
+  tree with lazily loaded children, inline add and rename, and archive behind a confirmation
+  warning it cascades and that existing tickets keep their location's name. Duplicate names
+  (`409`) and invalid names (`400`) show beside the input. **No "Show archived" toggle** — the
+  list endpoints (AD-22) return only active places and take no such flag. **Closes the MVP
+  facilities CRUD in the UI** — see AD-22.
+- **"How work flows"** — an admin dashboard section after "How fast tickets move": a
+  stacked-area cumulative flow diagram reading `GET /api/reports/flow` (AD-19, above).
+  `@mui/x-charts` `LineChart` — the AD-10 amendment, already recorded there, not repeated here —
+  lazy-loaded into its own chunk so non-admins never download it: main bundle 739 kB, chart
+  chunk 293 kB. Ranges — Today (hourly since local midnight), 7 days, last month, last 3 months
+  — are filtered client-side from the single response, the user's call; daily ranges plot the
+  **last point of each local day**, never summed, because CFD values are stock counts, not
+  deltas. Point scale, straight lines, no animation. A text summary line covers accessibility.
+  Flow utilities tested under two time zones.
+- **Fixed the same day:** the top `AppShell` header no longer wraps at 1280 px now that a fifth
+  admin nav link (Facilities) is present.
+- **Verified 2026-09-24:** 214 Vitest tests pass, 99.47% statements / 95.95% branches; lint and
+  build clean; browser-checked locally at 1280 and 375 px; deployed to CloudFront.
+- **Data note:** two archived test buildings named "Zz Test Building" are left in the local
+  database from this check — harmless, hidden (archived), local only.
+
 ### AD-19 · Dashboard and reporting strategy
 
 "Basic dashboard/reporting per persona" — three different dashboards, plus the seven
@@ -1927,6 +1957,20 @@ hard-coding `001_init`.
   first moves it to 180 and fails the test. 400 tests, 100%. Live: employee summary 3 vs
   admin 4 (visibility), escalation reason shown, employee `/timings` 403; live timings read
   0 s because scripted live checks act within the same second.
+
+#### Built 2026-09-24 (post-demo) — `GET /api/reports/flow`
+
+Admin-only cumulative-flow data, consumed by the CFD under AD-18 (below). Replays
+`incident_status_history` into hourly snapshots of how many tickets held each status over the
+last 90 days, plus a final "now" point: `{bucket:"hour", from, to, statuses, points:[{at,
+unassigned, open, in_progress, blocked, resolved, closed}]}`. Implementation is a span join —
+`lead()` gives each history row the timestamp of the ticket's *next* row, so it "holds" its
+status until then — against `generate_series` ticks; one pass, no per-tick subqueries. Deleted
+tickets are excluded, as with every other report. **Load on demand only, never polled (AD-14):**
+the response is ~270 kB and takes ~1 s locally; a code comment notes that a real system would
+pre-aggregate instead of replaying history on every request. 3 new tests (status per hour,
+deleted excluded, all-zero, admin-only) bring the backend suite to 412 tests, 100% coverage.
+Deployed to the cloud; the route is verified there (employee `403`, unknown path `404`).
 
 ### AD-20 · Priority and escalation model
 
@@ -2233,6 +2277,8 @@ report.
   loader now registers each module in `sys.modules` before executing it (dataclasses
   resolve forward references through it). 323 tests, 100%. Live: create at all three
   levels 201, duplicate 409, employee write 403 / read 200, archive cascade 204 then 404.
+- **Frontend admin `/facilities` CRUD page built 2026-09-24 (post-demo, commit `71c9f23`)** —
+  detail under AD-18. Closes this decision's MVP UI requirement.
 
 ---
 
