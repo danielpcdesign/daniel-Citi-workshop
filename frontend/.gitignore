@@ -1,0 +1,3 @@
+# cypress run artifacts
+cypress/screenshots/
+cypress/videos/
