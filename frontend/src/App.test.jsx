@@ -7,6 +7,7 @@ import { AuthContext } from './hooks/authContext.js'
 import { theme } from './theme.js'
 import { ADMIN, ENGINEER, LocationProbe, fakeAuth, renderPage } from './test/render.jsx'
 import RequireAuth from './components/RequireAuth.jsx'
+import SettingsProvider from './components/SettingsProvider.jsx'
 
 vi.mock('./services/incidentService.js', () => ({
     listIncidents: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, limit: 20 }),
@@ -39,10 +40,13 @@ function renderApp(route, auth)
     return render(
         <ThemeProvider theme={theme}>
             <AuthContext.Provider value={auth}>
-                <MemoryRouter initialEntries={[route]}>
-                    <App />
-                    <LocationProbe />
-                </MemoryRouter>
+                {/* as main.jsx does: the settings provider sits around the whole app */}
+                <SettingsProvider>
+                    <MemoryRouter initialEntries={[route]}>
+                        <App />
+                        <LocationProbe />
+                    </MemoryRouter>
+                </SettingsProvider>
             </AuthContext.Provider>
         </ThemeProvider>,
     )
@@ -123,6 +127,12 @@ describe('routing and guards', () =>
         unmount()
         renderApp('/facilities', fakeAuth({ user: ENGINEER }))
         expect(screen.getByTestId('location')).toHaveTextContent('/dashboard')
+    })
+
+    it('opens settings for anyone signed in', () =>
+    {
+        renderApp('/settings', fakeAuth())
+        expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument()
     })
 
     it('shows the register page and a not-found page', () =>

@@ -6,21 +6,21 @@ import TextField from '@mui/material/TextField'
 import { SEARCH_DEBOUNCE_MS } from './TicketLookup.jsx'
 import { useDebounced } from '../hooks/useDebounced.js'
 import { usePolling } from '../hooks/usePolling.js'
-import { searchEmployees } from '../services/userService.js'
+import { searchPromotable } from '../services/userService.js'
 
 function label(user)
 {
     return `${user.full_name} (${user.email})`
 }
 
-// the server filters by name or email and offers employees only; the browser shows what it returns (AD-13)
+// the server searches by name or email and offers only people who are not engineers yet (lacks=engineer, AD-13)
 export default function PromoteEngineer({ busy, onPromote })
 {
     const [search, setSearch] = useState('')
     const [text, setText] = useState('')
     const [picked, setPicked] = useState(null)
     const q = useDebounced(search.trim(), SEARCH_DEBOUNCE_MS)
-    const load = useCallback(() => searchEmployees(q), [q])
+    const load = useCallback(() => searchPromotable(q), [q])
     const found = usePolling(load, null)
 
     const submit = async (event) =>

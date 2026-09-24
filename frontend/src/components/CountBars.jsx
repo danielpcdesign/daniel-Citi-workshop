@@ -19,7 +19,7 @@ export default function CountBars({ rows, label, emptyText = 'Nothing to count y
                         <Typography variant="body2" sx={{ fontWeight: 700 }}>{row.count}</Typography>
                     </Box>
                     <Box aria-hidden="true" sx={{ mt: 0.5, height: 6, borderRadius: '2px', bgcolor: tokens.rule }}>
-                        <Box sx={{ height: '100%', borderRadius: '2px', bgcolor: row.color || tokens.plate, width: `${(row.count / largest) * 100}%` }} />
+                        <Box sx={{ height: '100%', borderRadius: '2px', bgcolor: row.color || tokens.mark, width: `${(row.count / largest) * 100}%` }} />
                     </Box>
                 </Box>
             ))}

@@ -13,6 +13,7 @@ import MyTicketsPage from './pages/MyTicketsPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
 import ReportPage from './pages/ReportPage.jsx'
+import SettingsPage from './pages/SettingsPage.jsx'
 import SignInPage from './pages/SignInPage.jsx'
 
 export default function App()
@@ -31,6 +32,7 @@ export default function App()
                 <Route path="/engineers" element={<RequireAuth roles={['admin']} redirectTo="/"><EngineersPage /></RequireAuth>} />
                 <Route path="/engineers/:id" element={<RequireAuth roles={['admin']} redirectTo="/"><EngineerProfilePage /></RequireAuth>} />
                 <Route path="/facilities" element={<RequireAuth roles={['admin']} redirectTo="/"><FacilitiesPage /></RequireAuth>} />
+                <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
                 <Route path="/tickets" element={<RequireAuth><MyTicketsPage /></RequireAuth>} />
                 <Route path="/report" element={<RequireAuth><ReportPage /></RequireAuth>} />
                 <Route path="/incidents/:id" element={<RequireAuth><IncidentPage /></RequireAuth>} />

@@ -18,7 +18,7 @@ export default function TimingTrack({ timings })
             {
                 const stat = timings[stage.key]
                 return (
-                    <Box component="li" key={stage.key} sx={{ listStyle: 'none', borderTop: `4px solid ${tokens.plate}`, pt: 1.25 }}>
+                    <Box component="li" key={stage.key} sx={{ listStyle: 'none', borderTop: `4px solid ${tokens.mark}`, pt: 1.25 }}>
                         <Typography variant="body2" color="text.secondary">{stage.label}</Typography>
                         <Typography variant="h4" component="p" sx={{ mt: 0.25 }}>{fmtDuration(stat.median_seconds)}</Typography>
                         {stat.count > 0 && (

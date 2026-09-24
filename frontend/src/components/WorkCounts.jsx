@@ -2,7 +2,7 @@ import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import { radius, tokens } from '../theme.js'
 
-const ON_PLATE_MUTED = 'rgba(244, 246, 247, 0.78)'
+const ON_PLATE_MUTED = tokens.onPlateMuted
 
 function total(columns, status)
 {
@@ -50,7 +50,7 @@ export default function WorkCounts({ columns })
             sx={{
                 m: 0,
                 bgcolor: tokens.plate,
-                color: tokens.paper,
+                color: tokens.onPlate,
                 borderRadius: `${radius.plate}px`,
                 px: { xs: 2.5, md: 3.5 },
                 py: { xs: 2, md: 2.5 },

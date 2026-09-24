@@ -16,8 +16,8 @@ export default function BoardColumn({ status, items, total })
             aria-labelledby={headingId}
             data-status={status}
             sx={{
-                bgcolor: blocked ? 'rgba(180, 35, 24, 0.06)' : 'rgba(31, 58, 77, 0.04)',
-                borderTop: `4px solid ${blocked ? tokens.signalRed : tokens.plate}`,
+                bgcolor: blocked ? tokens.blockedTint : tokens.tintSoft,
+                borderTop: `4px solid ${blocked ? tokens.signalRed : tokens.mark}`,
                 borderRadius: `${radius.surface}px`,
                 p: 1.25,
                 minWidth: 0,

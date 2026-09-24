@@ -7,7 +7,7 @@ function Fact({ label, children })
 {
     return (
         <Box>
-            <Typography component="dt" variant="caption" sx={{ color: 'rgba(244, 246, 247, 0.72)' }}>{label}</Typography>
+            <Typography component="dt" variant="caption" sx={{ color: tokens.onPlateMuted }}>{label}</Typography>
             <Typography component="dd" sx={{ m: 0, fontWeight: 700 }}>{children}</Typography>
         </Box>
     )
@@ -22,7 +22,7 @@ export default function IncidentPlate({ incident })
             component="header"
             sx={{
                 bgcolor: tokens.plate,
-                color: tokens.paper,
+                color: tokens.onPlate,
                 borderRadius: `${radius.plate}px`,
                 px: { xs: 2.5, md: 4 },
                 py: { xs: 2.5, md: 3.5 },
@@ -40,7 +40,7 @@ export default function IncidentPlate({ incident })
                 {fmtLocation(incident.location)}
             </Typography>
             {anyArchived(incident.location) && (
-                <Typography variant="body2" sx={{ color: 'rgba(244, 246, 247, 0.8)' }}>
+                <Typography variant="body2" sx={{ color: tokens.onPlateMuted }}>
                     Part of this location has since been removed from the facility list.
                 </Typography>
             )}
@@ -50,7 +50,7 @@ export default function IncidentPlate({ incident })
                     m: 0,
                     mt: 3,
                     pt: 2,
-                    borderTop: '1px solid rgba(244, 246, 247, 0.25)',
+                    borderTop: `1px solid ${tokens.onPlateRule}`,
                     display: 'grid',
                     gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, auto)' },
                     justifyContent: 'start',

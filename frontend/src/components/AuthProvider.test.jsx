@@ -25,6 +25,8 @@ function Probe()
         <div>
             <span data-testid="status">{auth.status}</span>
             <span data-testid="user">{auth.user ? auth.user.full_name : 'nobody'}</span>
+            <span data-testid="role">{auth.user ? auth.user.role : 'none'}</span>
+            <button onClick={() => auth.switchRole('engineer').catch(() => undefined)}>switch</button>
             <span data-testid="boot">{auth.bootError ? auth.bootError.code : 'none'}</span>
             <button onClick={() => auth.signIn('emp@acme.inc', 'pw')}>sign in</button>
             <button onClick={() => auth.register({ fullName: 'Erin', email: 'emp@acme.inc', password: 'pw' })}>register</button>
@@ -123,6 +125,39 @@ describe('AuthProvider', () =>
             await http.get('/api/incidents').catch(() => undefined)
         })
         expect(screen.getByTestId('user')).toHaveTextContent('nobody')
+    })
+
+    it('switches the active role: posts it, replaces the token in memory, and updates the user', async () =>
+    {
+        const held = { ...USER, role: 'admin', roles: ['employee', 'engineer', 'admin'] }
+        fetchMock.mockImplementationOnce(async () => json(200, { access_token: 'tok', user: held }))
+        const user = userEvent.setup()
+        render(<AuthProvider><Probe /></AuthProvider>)
+        await waitFor(() => expect(screen.getByTestId('role')).toHaveTextContent('admin'))
+
+        fetchMock.mockImplementationOnce(async () => json(200, { access_token: 'tok-engineer', expires_in: 900, user: { ...held, role: 'engineer' } }))
+        await user.click(screen.getByRole('button', { name: 'switch' }))
+        await waitFor(() => expect(screen.getByTestId('role')).toHaveTextContent('engineer'))
+        const [url, init] = fetchMock.mock.calls.at(-1)
+        expect(url).toBe('/api/auth/active-role')
+        expect(init.method).toBe('POST')
+        expect(JSON.parse(init.body)).toEqual({ role: 'engineer' })
+        // the old role's token is gone: the next request carries the new one
+        expect(getAccessToken()).toBe('tok-engineer')
+    })
+
+    it('keeps the current role when the server refuses a switch', async () =>
+    {
+        const held = { ...USER, role: 'admin', roles: ['employee', 'admin'] }
+        fetchMock.mockImplementationOnce(async () => json(200, { access_token: 'tok', user: held }))
+        const user = userEvent.setup()
+        render(<AuthProvider><Probe /></AuthProvider>)
+        await waitFor(() => expect(screen.getByTestId('role')).toHaveTextContent('admin'))
+        fetchMock.mockImplementationOnce(async () => json(403, { error: { code: 'forbidden', message: 'role not held', request_id: 'r' } }))
+        await user.click(screen.getByRole('button', { name: 'switch' }))
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+        expect(screen.getByTestId('role')).toHaveTextContent('admin')
+        expect(getAccessToken()).toBe('tok')
     })
 
     it('useAuth outside the provider is a programming error', () =>

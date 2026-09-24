@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTheme } from '@mui/material/styles'
 import { LineChart } from '@mui/x-charts/LineChart'
 import Box from '@mui/material/Box'
 import ToggleButton from '@mui/material/ToggleButton'
@@ -6,7 +7,6 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { DEFAULT_RANGE, FLOW_STATUSES, RANGES, STACK_ORDER, flowIsEmpty, flowRange } from '../utils/flow.js'
 import { STATUS_LABEL } from '../utils/format.js'
-import { statusColors } from '../theme.js'
 
 // minutes shown: the last point is "now", which is rarely on the hour
 const hourLabel = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -25,6 +25,8 @@ function nowLine(point)
 export default function FlowChart({ flow })
 {
     const [rangeKey, setRangeKey] = useState(DEFAULT_RANGE)
+    // the band colours follow the appearance and colour settings (theme.acme.status)
+    const statusColors = useTheme().acme.status
     const range = RANGES.find((candidate) => candidate.key === rangeKey)
     const points = flowRange(flow.points, rangeKey)
     const latest = flow.points[flow.points.length - 1]

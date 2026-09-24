@@ -26,7 +26,7 @@ function DirectoryEntry({ entry, active, onGo, nested })
                 py: 0.75,
                 pl: nested ? 4 : 2,
                 pr: 1,
-                borderLeft: `4px solid ${current ? tokens.plate : 'transparent'}`,
+                borderLeft: `4px solid ${current ? tokens.mark : 'transparent'}`,
                 color: current ? tokens.ink : tokens.muted,
                 fontWeight: current ? 700 : 400,
                 lineHeight: 1.35,
@@ -60,7 +60,7 @@ function StripEntry({ entry, active, onGo })
                     color: current ? tokens.ink : tokens.muted,
                     fontWeight: 700,
                     textDecoration: 'none',
-                    borderBottom: `3px solid ${current ? tokens.plate : 'transparent'}`,
+                    borderBottom: `3px solid ${current ? tokens.mark : 'transparent'}`,
                 }}
             >
                 {entry.label}

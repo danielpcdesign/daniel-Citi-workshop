@@ -4,16 +4,16 @@ import userEvent from '@testing-library/user-event'
 import EngineersPage from './EngineersPage.jsx'
 import { ApiError } from '../services/http.js'
 import { listEngineersByWorkload, setAvailability } from '../services/engineerService.js'
-import { changeRole, searchEmployees } from '../services/userService.js'
+import { searchPromotable, setRoles } from '../services/userService.js'
 import { ADMIN, fakeAuth, renderPage } from '../test/render.jsx'
 
 vi.mock('../services/engineerService.js', () => ({ listEngineersByWorkload: vi.fn(), setAvailability: vi.fn() }))
-vi.mock('../services/userService.js', () => ({ searchEmployees: vi.fn(), changeRole: vi.fn() }))
+vi.mock('../services/userService.js', () => ({ searchPromotable: vi.fn(), setRoles: vi.fn() }))
 
 const ENGINEERS = [
     { id: 7, email: 'sofia@acme.inc', full_name: 'Sofia Alvarez', is_available: true, workload: 0 },
-    { id: 6, email: 'marcus@acme.inc', full_name: 'Marcus Webb', is_available: true, workload: 1 },
-    { id: 5, email: 'priya@acme.inc', full_name: 'Priya Nair', is_available: false, workload: 3 },
+    { id: 6, email: 'marcus@acme.inc', full_name: 'Marcus Webb', is_available: true, workload: 1, roles: ['employee', 'engineer'] },
+    { id: 5, email: 'priya@acme.inc', full_name: 'Priya Nair', is_available: false, workload: 3, roles: ['employee', 'engineer', 'admin'] },
 ]
 
 function page(items)
@@ -34,7 +34,7 @@ function section()
 beforeEach(() =>
 {
     listEngineersByWorkload.mockResolvedValue(page(ENGINEERS))
-    searchEmployees.mockResolvedValue(page([]))
+    searchPromotable.mockResolvedValue(page([]))
     setAvailability.mockResolvedValue({})
 })
 
@@ -46,7 +46,7 @@ describe("Who's available", () =>
         const team = await section()
         const table = await within(team).findByRole('table', { name: 'Engineers' })
         const rows = within(table).getAllByRole('row').slice(1)
-        expect(rows.map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual(['Sofia Alvarez', 'Marcus Webb', 'Priya Nair'])
+        expect(rows.map((row) => within(within(row).getAllByRole('cell')[0]).getByRole('link').textContent)).toEqual(['Sofia Alvarez', 'Marcus Webb', 'Priya Nair'])
         expect(rows[2]).toHaveTextContent('priya@acme.inc')
         expect(rows[2]).toHaveTextContent('Not taking new work')
         expect(rows[2]).toHaveTextContent('3')
@@ -82,19 +82,23 @@ describe("Who's available", () =>
     it('finds an employee by search and makes them an engineer', async () =>
     {
         const user = userEvent.setup()
-        searchEmployees.mockImplementation(async (q) => page(q === 'ali' ? [{ id: 9, email: 'ali@acme.inc', full_name: 'Ali Khan', role: 'employee' }] : []))
-        changeRole.mockResolvedValue({ user: { id: 9, role: 'engineer' }, unassigned_incidents: [] })
+        // the server leaves engineers out (lacks=engineer); an admin who is not an engineer is a candidate
+        searchPromotable.mockImplementation(async (q) => page(q === 'ali'
+            ? [{ id: 9, email: 'ali@acme.inc', full_name: 'Ali Khan', role: 'admin', roles: ['employee', 'admin'] }]
+            : []))
+        setRoles.mockResolvedValue({ user: { id: 9, role: 'admin', roles: ['employee', 'engineer', 'admin'] }, unassigned_incidents: [] })
         renderAs(ADMIN)
         const team = await section()
         const promote = within(team).getByRole('button', { name: 'Make engineer' })
         expect(promote).toBeDisabled()
 
         await user.type(within(team).getByRole('combobox', { name: 'Find an employee' }), 'ali')
-        await waitFor(() => expect(searchEmployees).toHaveBeenLastCalledWith('ali'))
+        await waitFor(() => expect(searchPromotable).toHaveBeenLastCalledWith('ali'))
         await user.click(await screen.findByRole('option', { name: 'Ali Khan (ali@acme.inc)' }))
         await user.click(promote)
 
-        expect(changeRole).toHaveBeenCalledWith(9, 'engineer')
+        // the whole set: what they held, plus engineer; an admin stays an admin
+        expect(setRoles).toHaveBeenCalledWith(9, ['employee', 'engineer', 'admin'])
         expect(await within(team).findByText('Ali Khan is now an engineer and can be assigned tickets.')).toBeInTheDocument()
         await waitFor(() => expect(listEngineersByWorkload).toHaveBeenCalledTimes(2))
         expect(within(team).getByRole('combobox', { name: 'Find an employee' })).toHaveValue('')
@@ -103,8 +107,9 @@ describe("Who's available", () =>
     it('keeps the pick when a promotion fails', async () =>
     {
         const user = userEvent.setup()
-        searchEmployees.mockResolvedValue(page([{ id: 9, email: 'ali@acme.inc', full_name: 'Ali Khan', role: 'employee' }]))
-        changeRole.mockRejectedValue(new ApiError({ status: 409, code: 'conflict', message: 'That user is no longer an employee.' }))
+        // a user from before roles existed: the active role stands in for the set
+        searchPromotable.mockResolvedValue(page([{ id: 9, email: 'ali@acme.inc', full_name: 'Ali Khan', role: 'employee' }]))
+        setRoles.mockRejectedValue(new ApiError({ status: 409, code: 'conflict', message: 'That user is no longer an employee.' }))
         renderAs(ADMIN)
         const team = await section()
         await user.click(within(team).getByRole('combobox', { name: 'Find an employee' }))
@@ -112,6 +117,7 @@ describe("Who's available", () =>
         await user.click(within(team).getByRole('button', { name: 'Make engineer' }))
         expect(await within(team).findByRole('alert')).toHaveTextContent('That user is no longer an employee.')
         expect(within(team).getByRole('combobox', { name: 'Find an employee' })).toHaveValue('Ali Khan (ali@acme.inc)')
+        expect(setRoles).toHaveBeenCalledWith(9, ['employee', 'engineer'])
     })
 
     it('asks before demoting, states what happens to the tickets, and sends nothing on cancel', async () =>
@@ -126,7 +132,7 @@ describe("Who's available", () =>
         expect(cancel).toHaveFocus()
         await user.click(cancel)
         await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-        expect(changeRole).not.toHaveBeenCalled()
+        expect(setRoles).not.toHaveBeenCalled()
 
         await user.click(within(team).getByRole('button', { name: 'Demote Marcus Webb' }))
         expect(await screen.findByRole('dialog')).toHaveTextContent('Their 1 active ticket will go back to Unassigned for reassignment.')
@@ -135,34 +141,37 @@ describe("Who's available", () =>
     it('demotes on confirm, lists the tickets sent back to triage, and re-reads the list', async () =>
     {
         const user = userEvent.setup()
-        changeRole.mockResolvedValue({ user: { id: 5, role: 'employee' }, unassigned_incidents: [12, 40] })
+        setRoles.mockResolvedValue({ user: { id: 5, role: 'admin', roles: ['employee', 'admin'] }, unassigned_incidents: [12, 40] })
         renderAs(ADMIN)
         const team = await section()
         await user.click(await within(team).findByRole('button', { name: 'Demote Priya Nair' }))
         await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Demote' }))
 
-        expect(changeRole).toHaveBeenCalledWith(5, 'employee')
-        expect(await within(team).findByText('Priya Nair is now an employee. Returned to triage: INC-12, INC-40.')).toBeInTheDocument()
+        // the set she holds, minus engineer: her admin role is kept
+        expect(setRoles).toHaveBeenCalledWith(5, ['employee', 'admin'])
+        expect(await within(team).findByText('Priya Nair is no longer an engineer. Returned to triage: INC-12, INC-40.')).toBeInTheDocument()
         await waitFor(() => expect(listEngineersByWorkload).toHaveBeenCalledTimes(2))
     })
 
     it('says nothing is reassigned for an engineer with no tickets', async () =>
     {
         const user = userEvent.setup()
-        changeRole.mockResolvedValue({ user: { id: 7, role: 'employee' }, unassigned_incidents: [] })
+        listEngineersByWorkload.mockResolvedValue(page([{ ...ENGINEERS[0], roles: ['employee', 'engineer'] }, ...ENGINEERS.slice(1)]))
+        setRoles.mockResolvedValue({ user: { id: 7, role: 'employee', roles: ['employee'] }, unassigned_incidents: [] })
         renderAs(ADMIN)
         const team = await section()
         await user.click(await within(team).findByRole('button', { name: 'Demote Sofia Alvarez' }))
         const dialog = await screen.findByRole('dialog')
         expect(dialog).toHaveTextContent('They have no active tickets, so nothing is reassigned.')
         await user.click(within(dialog).getByRole('button', { name: 'Demote' }))
-        expect(await within(team).findByText('Sofia Alvarez is now an employee. No tickets needed reassigning.')).toBeInTheDocument()
+        expect(await within(team).findByText('Sofia Alvarez is no longer an engineer. No tickets needed reassigning.')).toBeInTheDocument()
+        expect(setRoles).toHaveBeenCalledWith(7, ['employee'])
     })
 
     it('keeps the dialog open with the reason when a demotion fails', async () =>
     {
         const user = userEvent.setup()
-        changeRole.mockRejectedValue(new ApiError({ status: 500, code: 'internal', message: 'boom', requestId: 'req-8' }))
+        setRoles.mockRejectedValue(new ApiError({ status: 500, code: 'internal', message: 'boom', requestId: 'req-8' }))
         renderAs(ADMIN)
         const team = await section()
         await user.click(await within(team).findByRole('button', { name: 'Demote Priya Nair' }))
@@ -170,6 +179,28 @@ describe("Who's available", () =>
         await user.click(within(dialog).getByRole('button', { name: 'Demote' }))
         expect(await within(dialog).findByRole('alert')).toHaveTextContent('Quote reference req-8')
         expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    it('sends nothing when a row does not say which roles are held, rather than guess them', async () =>
+    {
+        const user = userEvent.setup()
+        renderAs(ADMIN)
+        const team = await section()
+        await user.click(await within(team).findByRole('button', { name: 'Demote Sofia Alvarez' }))
+        const dialog = await screen.findByRole('dialog')
+        await user.click(within(dialog).getByRole('button', { name: 'Demote' }))
+        expect(await within(dialog).findByRole('alert')).toHaveTextContent('did not say which roles this person holds')
+        expect(setRoles).not.toHaveBeenCalled()
+    })
+
+    it('shows roles beyond engineer as tags', async () =>
+    {
+        renderAs(ADMIN)
+        const table = await within(await section()).findByRole('table', { name: 'Engineers' })
+        const priya = within(table).getAllByRole('row').find((row) => row.textContent.includes('Priya Nair'))
+        expect(priya).toHaveTextContent('Facility admin')
+        const marcus = within(table).getAllByRole('row').find((row) => row.textContent.includes('Marcus Webb'))
+        expect(marcus).not.toHaveTextContent('Facility admin')
     })
 
     it('says when there are no engineers yet', async () =>

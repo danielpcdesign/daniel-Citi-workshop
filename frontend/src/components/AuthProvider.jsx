@@ -52,6 +52,14 @@ export default function AuthProvider({ children })
         return signIn(email, password)
     }, [signIn])
 
+    // the same person in another of their roles: new token, new user, and everything that reads user.role follows
+    const switchRole = useCallback(async (role) =>
+    {
+        const user = await authService.setActiveRole(role)
+        setSession({ status: 'ready', user, bootError: null })
+        return user
+    }, [])
+
     const signOut = useCallback(async () =>
     {
         try
@@ -65,8 +73,8 @@ export default function AuthProvider({ children })
     }, [])
 
     const value = useMemo(
-        () => ({ ...session, signIn, register, signOut }),
-        [session, signIn, register, signOut],
+        () => ({ ...session, signIn, register, signOut, switchRole }),
+        [session, signIn, register, signOut, switchRole],
     )
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

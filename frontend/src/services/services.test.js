@@ -13,7 +13,7 @@ import {
 import { addNote, deleteNote, editNote, listNotes } from './noteService.js'
 import { archivePlace, createPlace, listBuildings, listFloors, listSeats, renamePlace } from './facilityService.js'
 import { getEngineer, listAvailableEngineers, listEngineers, listEngineersByWorkload, setAvailability } from './engineerService.js'
-import { changeRole, searchEmployees } from './userService.js'
+import { searchPromotable, setRoles } from './userService.js'
 
 let fetchMock
 
@@ -155,9 +155,9 @@ describe('facility and engineer services', () =>
         expect(lastCall()).toEqual({ url: '/api/engineers/5', method: 'GET', body: undefined })
         await setAvailability(5, false)
         expect(lastCall()).toEqual({ url: '/api/engineers/5/availability', method: 'PUT', body: { is_available: false } })
-        await searchEmployees('ali')
-        expect(lastCall().url).toBe('/api/auth/users?q=ali&role=employee&sort=full_name&limit=10')
-        await changeRole(9, 'engineer')
-        expect(lastCall()).toEqual({ url: '/api/auth/users/9/role', method: 'PUT', body: { role: 'engineer' } })
+        await searchPromotable('ali')
+        expect(lastCall().url).toBe('/api/auth/users?q=ali&lacks=engineer&sort=full_name&limit=20')
+        await setRoles(9, ['employee', 'engineer'])
+        expect(lastCall()).toEqual({ url: '/api/auth/users/9/roles', method: 'PUT', body: { roles: ['employee', 'engineer'] } })
     })
 })

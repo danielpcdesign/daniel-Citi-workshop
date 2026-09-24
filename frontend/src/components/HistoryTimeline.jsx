@@ -102,9 +102,9 @@ export default function HistoryTimeline({ history, now, sx, title = 'History', h
                                     width: 12,
                                     height: 12,
                                     borderRadius: '3px',
-                                    bgcolor: blocked ? tokens.signalRed : tokens.plate,
+                                    bgcolor: blocked ? tokens.signalRed : tokens.mark,
                                     // the ticket's current position is solid; earlier moves are outlines
-                                    ...(index > 0 && { bgcolor: tokens.surface, border: `2px solid ${blocked ? tokens.signalRed : tokens.plate}` }),
+                                    ...(index > 0 && { bgcolor: tokens.surface, border: `2px solid ${blocked ? tokens.signalRed : tokens.mark}` }),
                                 }}
                             />
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 2 }}>

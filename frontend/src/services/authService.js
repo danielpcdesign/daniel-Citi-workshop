@@ -34,3 +34,12 @@ export async function signOut(options = {})
         setAccessToken(null)
     }
 }
+
+// the role to act in, from the roles held; the server re-mints the access token for it and keeps the choice on the
+// refresh session, so a reload stays in that role. same shape as a refresh; the cookie is untouched
+export async function setActiveRole(role, options = {})
+{
+    const session = await http.post(`${BASE}/active-role`, { role }, options)
+    setAccessToken(session.access_token)
+    return session.user
+}

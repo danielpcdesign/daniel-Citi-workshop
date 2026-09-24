@@ -7,16 +7,29 @@ import EngineerTable from './EngineerTable.jsx'
 import ErrorNotice from './ErrorNotice.jsx'
 import PromoteEngineer from './PromoteEngineer.jsx'
 import { setAvailability } from '../services/engineerService.js'
-import { changeRole } from '../services/userService.js'
+import { setRoles } from '../services/userService.js'
+import { heldRoles, withRole, withoutRole } from '../utils/roles.js'
 import { fmtRef } from '../utils/format.js'
+import { ApiError } from '../services/http.js'
+
+// the roles the engineer holds now, from the row itself; the full set goes back minus engineer, so an admin who is
+// also an engineer stays an admin. without roles on the row nothing is sent: a guessed set could remove a role
+function currentRoles(engineer)
+{
+    if (Array.isArray(engineer.roles) && engineer.roles.length)
+    {
+        return engineer.roles
+    }
+    throw new ApiError({ status: 0, code: 'bad_request', message: 'The engineer list did not say which roles this person holds. Reload and try again.' })
+}
 
 function returnedLine(name, incidentIds)
 {
     if (!incidentIds.length)
     {
-        return `${name} is now an employee. No tickets needed reassigning.`
+        return `${name} is no longer an engineer. No tickets needed reassigning.`
     }
-    return `${name} is now an employee. Returned to triage: ${incidentIds.map(fmtRef).join(', ')}.`
+    return `${name} is no longer an engineer. Returned to triage: ${incidentIds.map(fmtRef).join(', ')}.`
 }
 
 // who can take work and who holds it; every change is the server's call, then the table is re-read (AD-09)
@@ -56,7 +69,7 @@ export default function EngineerPanel({ engineers, onChanged })
         setNotice(null)
         try
         {
-            await changeRole(user.id, 'engineer')
+            await setRoles(user.id, withRole(heldRoles(user), 'engineer'))
             setNotice(`${user.full_name} is now an engineer and can be assigned tickets.`)
             await onChanged()
             return true
@@ -78,7 +91,7 @@ export default function EngineerPanel({ engineers, onChanged })
         setDemoting({ engineer, busy: true, error: null })
         try
         {
-            const result = await changeRole(engineer.id, 'employee')
+            const result = await setRoles(engineer.id, withoutRole(currentRoles(engineer), 'engineer'))
             setDemoting({ engineer: null, busy: false, error: null })
             setError(null)
             setNotice(returnedLine(engineer.full_name, result.unassigned_incidents || []))

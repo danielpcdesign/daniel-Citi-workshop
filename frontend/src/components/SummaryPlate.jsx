@@ -5,7 +5,7 @@ import Typography from '@mui/material/Typography'
 import { fmtAgo, fmtRef } from '../utils/format.js'
 import { radius, tokens } from '../theme.js'
 
-const ON_PLATE_MUTED = 'rgba(244, 246, 247, 0.78)'
+const ON_PLATE_MUTED = tokens.onPlateMuted
 
 // work not yet handed back to the reporter; resolved waits on an admin, so it is counted on its own
 function openWork(byStatus)
@@ -77,7 +77,7 @@ export default function SummaryPlate({ summary, scopeNote, onOpen })
         <Box
             component="section"
             aria-labelledby="summary-heading"
-            sx={{ bgcolor: tokens.plate, color: tokens.paper, borderRadius: `${radius.plate}px`, px: { xs: 2.5, md: 4 }, py: { xs: 2.5, md: 3.5 } }}
+            sx={{ bgcolor: tokens.plate, color: tokens.onPlate, borderRadius: `${radius.plate}px`, px: { xs: 2.5, md: 4 }, py: { xs: 2.5, md: 3.5 } }}
         >
             <Typography id="summary-heading" variant="h4" component="h2">Right now</Typography>
             <Typography variant="body2" sx={{ color: ON_PLATE_MUTED }}>{scopeNote} Select a number to list those tickets.</Typography>
@@ -106,12 +106,12 @@ export default function SummaryPlate({ summary, scopeNote, onOpen })
                     )
                 })}
             </Box>
-            <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid rgba(244, 246, 247, 0.25)' }}>
+            <Box sx={{ mt: 3, pt: 2, borderTop: `1px solid ${tokens.onPlateRule}` }}>
                 {oldest
                     ? (
                         <Typography>
                             Oldest open ticket:{' '}
-                            <Link component={RouterLink} to={`/incidents/${oldest.id}`} sx={{ color: tokens.paper, fontWeight: 700 }}>
+                            <Link component={RouterLink} to={`/incidents/${oldest.id}`} sx={{ color: tokens.onPlate, fontWeight: 700 }}>
                                 {fmtRef(oldest.id)} {oldest.title}
                             </Link>
                             , reported {fmtAgo(oldest.created_at)}.

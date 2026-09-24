@@ -49,6 +49,16 @@ describe('AppShell', () =>
         expect(screen.queryByRole('link', { name: 'Facilities' })).not.toBeInTheDocument()
     })
 
+    it('names the active role when several are held, and links the name to settings', async () =>
+    {
+        const user = userEvent.setup()
+        renderPage(<AppShell><p>page</p></AppShell>, { auth: fakeAuth({ user: { ...ADMIN, role: 'engineer', roles: ['employee', 'engineer', 'admin'] } }) })
+        const settings = screen.getByRole('link', { name: 'Ada Admin, as engineer, settings' })
+        expect(settings).toHaveAttribute('href', '/settings')
+        await user.click(settings)
+        await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/settings'))
+    })
+
     it('keeps the dashboard out of an employee\'s nav', () =>
     {
         renderPage(<AppShell><p>page</p></AppShell>, { auth: fakeAuth({ user: EMPLOYEE }) })
@@ -71,6 +81,7 @@ describe('AppShell', () =>
         renderPage(<AppShell><p>page</p></AppShell>, { auth: fakeAuth({ signOut }) })
         expect(screen.queryByRole('link', { name: 'My tickets' })).not.toBeInTheDocument()
         await user.click(screen.getByRole('button', { name: 'Open menu' }))
+        expect(await screen.findByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings')
         await user.click(await screen.findByRole('link', { name: 'Report a problem' }))
         await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/report'))
         // the closing drawer keeps the page aria-hidden until it has gone

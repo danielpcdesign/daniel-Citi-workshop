@@ -20,7 +20,7 @@ export default function StatusTrack({ status })
                     let color = tokens.rule
                     if (index < current || (index === current && !blocked))
                     {
-                        color = tokens.plate
+                        color = tokens.mark
                     }
                     else if (index === current && blocked)
                     {

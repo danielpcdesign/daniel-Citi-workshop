@@ -326,7 +326,7 @@ export default function DashboardPage()
                         <Box
                             component="span"
                             aria-hidden="true"
-                            sx={{ width: 40, height: 40, flexShrink: 0, display: 'grid', placeItems: 'center', bgcolor: tokens.plate, color: tokens.paper, borderRadius: `${radius.control}px` }}
+                            sx={{ width: 40, height: 40, flexShrink: 0, display: 'grid', placeItems: 'center', bgcolor: tokens.plate, color: tokens.onPlate, borderRadius: `${radius.control}px` }}
                         >
                             <SearchIcon />
                         </Box>

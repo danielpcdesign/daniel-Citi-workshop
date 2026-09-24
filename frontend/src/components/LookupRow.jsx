@@ -40,9 +40,9 @@ export default function LookupRow({ incident, selected, onSelect })
                 alignItems: 'stretch',
                 borderBottom: `1px solid ${tokens.rule}`,
                 '&:last-of-type': { borderBottom: 0 },
-                bgcolor: selected ? 'rgba(31, 58, 77, 0.07)' : 'transparent',
+                bgcolor: selected ? tokens.tint : 'transparent',
                 // the selected row is marked by position too, not by tint alone
-                boxShadow: selected ? `inset 4px 0 0 ${tokens.plate}` : 'none',
+                boxShadow: selected ? `inset 4px 0 0 ${tokens.mark}` : 'none',
             }}
         >
             <ButtonBase
@@ -55,7 +55,7 @@ export default function LookupRow({ incident, selected, onSelect })
                     textAlign: 'left',
                     px: 2,
                     py: 1.5,
-                    '&:hover': { bgcolor: selected ? 'transparent' : 'rgba(31, 58, 77, 0.04)' },
+                    '&:hover': { bgcolor: selected ? 'transparent' : tokens.tintSoft },
                     '&:hover .lookup-title': { textDecoration: 'underline' },
                 }}
             >

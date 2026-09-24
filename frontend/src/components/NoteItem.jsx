@@ -75,7 +75,7 @@ export default function NoteItem({ note, canEdit, canDelete, onEdit, onDelete })
             sx={{
                 listStyle: 'none',
                 py: 1.5,
-                ...(isEvent && { pl: 2, borderLeft: `3px solid ${note.kind === 'blocked' ? tokens.signalRed : tokens.plate}` }),
+                ...(isEvent && { pl: 2, borderLeft: `3px solid ${note.kind === 'blocked' ? tokens.signalRed : tokens.mark}` }),
             }}
         >
             <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 1 }}>

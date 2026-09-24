@@ -3,14 +3,16 @@ import { http } from './http.js'
 // user administration lives in the auth service, which owns roles (AD-21)
 const BASE = '/api/auth/users'
 
-// candidates for promotion: registered employees whose name or email matches
-export function searchEmployees(q, options = {})
+// people who could be made engineers: the server's `lacks` filter, since everyone holds employee and
+// `role=employee` would match engineers too
+export function searchPromotable(q, options = {})
 {
-    return http.get(BASE, { ...options, query: { q, role: 'employee', sort: 'full_name', limit: 10 } })
+    return http.get(BASE, { ...options, query: { q, lacks: 'engineer', sort: 'full_name', limit: 20 } })
 }
 
-// resolves to {user, unassigned_incidents}: a demoted engineer's active tickets go back to triage (AD-21)
-export function changeRole(userId, role, options = {})
+// the full set of roles to hold, replacing the old set; resolves to {user, unassigned_incidents}:
+// dropping engineer sends that person's active tickets back to triage (AD-21)
+export function setRoles(userId, roles, options = {})
 {
-    return http.put(`${BASE}/${userId}/role`, { role }, options)
+    return http.put(`${BASE}/${userId}/roles`, { roles }, options)
 }

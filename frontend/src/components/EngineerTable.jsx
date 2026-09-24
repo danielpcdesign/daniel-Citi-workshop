@@ -2,6 +2,7 @@ import { Link as RouterLink } from 'react-router-dom'
 import { useMediaQuery } from 'react-responsive'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
 import Link from '@mui/material/Link'
 import Table from '@mui/material/Table'
 import TableBody from '@mui/material/TableBody'
@@ -11,6 +12,7 @@ import TableRow from '@mui/material/TableRow'
 import Typography from '@mui/material/Typography'
 import { MOBILE_QUERY } from './AppShell.jsx'
 import AvailabilitySwitch from './AvailabilitySwitch.jsx'
+import { ROLE_LABEL } from '../utils/roles.js'
 import { srOnly, tokens } from '../theme.js'
 
 // the count is the fact; the bar only makes the spread across engineers visible at a glance
@@ -20,19 +22,24 @@ function Workload({ count, most })
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Typography component="span" sx={{ fontWeight: 700, minWidth: '2ch', textAlign: 'right' }}>{count}</Typography>
             <Box aria-hidden="true" sx={{ flex: 1, maxWidth: 120, height: 6, borderRadius: '2px', bgcolor: tokens.rule }}>
-                <Box sx={{ width: `${(count / most) * 100}%`, height: '100%', borderRadius: '2px', bgcolor: tokens.plate }} />
+                <Box sx={{ width: `${(count / most) * 100}%`, height: '100%', borderRadius: '2px', bgcolor: tokens.mark }} />
             </Box>
         </Box>
     )
 }
 
-// the name opens the read-only view of that engineer's work
+// the name opens the read-only view of that engineer's work; roles beyond engineer (an admin who also fixes things)
+// are shown as tags when the list carries them
 function ProfileLink({ engineer })
 {
+    const extra = (engineer.roles || []).filter((role) => role !== 'employee' && role !== 'engineer')
     return (
-        <Link component={RouterLink} to={`/engineers/${engineer.id}`} sx={{ color: 'text.primary', fontWeight: 700 }}>
-            {engineer.full_name}
-        </Link>
+        <Box component="span" sx={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.75 }}>
+            <Link component={RouterLink} to={`/engineers/${engineer.id}`} sx={{ color: 'text.primary', fontWeight: 700 }}>
+                {engineer.full_name}
+            </Link>
+            {extra.map((role) => <Chip key={role} size="small" variant="outlined" label={ROLE_LABEL[role] || role} />)}
+        </Box>
     )
 }
 

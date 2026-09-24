@@ -101,8 +101,8 @@ export default function EngineerProfilePage()
                             rowGap: 0.5,
                             px: 2,
                             py: 1.5,
-                            bgcolor: 'rgba(31, 58, 77, 0.06)',
-                            borderLeft: `4px solid ${tokens.plate}`,
+                            bgcolor: tokens.tint,
+                            borderLeft: `4px solid ${tokens.mark}`,
                             borderRadius: 1,
                         }}
                     >

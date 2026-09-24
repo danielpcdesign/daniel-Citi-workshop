@@ -3,7 +3,10 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import HistoryTimeline, { PHONE_VISIBLE } from './HistoryTimeline.jsx'
 import { renderPage } from '../test/render.jsx'
-import { tokens } from '../theme.js'
+import { tokenValues } from '../theme.js'
+
+// the palette's concrete red: components use css variables, the error colour resolves to this
+const RED = tokenValues().signalRed
 
 const NOW = new Date('2026-09-20T12:00:00+00:00').getTime()
 const ERIN = { actor_id: 40, actor_name: 'Erin Employee' }
@@ -57,8 +60,8 @@ describe('HistoryTimeline', () =>
         ])
         const [latest, , assigned, created] = items()
         expect(latest).toHaveTextContent(/^In progress→ to Blocked/)
-        expect(within(latest).getByText('Blocked')).toHaveStyle({ color: tokens.signalRed })
-        expect(within(latest).getByText('In progress')).not.toHaveStyle({ color: tokens.signalRed })
+        expect(within(latest).getByText('Blocked')).toHaveStyle({ color: RED })
+        expect(within(latest).getByText('In progress')).not.toHaveStyle({ color: RED })
         expect(within(latest).getByText('Waiting for a new valve')).toBeInTheDocument()
         expect(within(latest).getByText('by Eli Engineer')).toBeInTheDocument()
         expect(within(latest).getByText('1 hour ago', { exact: false })).toBeInTheDocument()
