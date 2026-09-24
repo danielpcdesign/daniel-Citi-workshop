@@ -84,6 +84,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-03 | Schema ownership and migrations | **A private `backend/_migrate/` Lambda, declared in its own `infra/migrate.tf` with no Function URL, invoked by Terraform (`aws_lambda_invocation`) during `apply`.** Format: numbered forward-only SQL files with checksums in a `schema_migrations` table. |
 | AD-04 | DB access layer | **Raw `psycopg` 3, as in the example: one module-scope connection per warm Lambda container, opened lazily, dropped and reopened on error.** No pool, no SQLAlchemy. Lives in `_shared/` (AD-02). Multi-row writes in `with conn.transaction():`. |
 | AD-05 | Intra-Lambda routing | **Hand-rolled router in `_shared/`:** method + path-pattern table, `404` unknown path, `405` + `Allow` wrong method, optional `/api/<service>` prefix and duplicate slashes normalised. No framework. |
+| AD-06 | API path and client | **Same-origin `/api/<service>` (Vite proxy locally, CloudFront in cloud); one wrapper: in-memory `X-Access-Token`, single-flight refresh, correlation id, error envelope, SHA-256 body hash for POST/PUT.** |
 | AD-07 | Auth mechanism | **Self-issued JWT, implemented for real** — signed token, carried in `X-Access-Token` (AD-08c), verified in every handler, with expiry. Not OAuth, not Cognito. A sign-in that returns a user without issuing a token does not satisfy this. |
 | AD-07a | Signing algorithm | **RS256.** Only the `auth` service holds the private key; all other services verify with the public key, distributed as a plain env var. |
 | AD-07b | Signing key storage | **AWS Secrets Manager**, private key only, read by the `auth` service alone and cached at module scope. Local dev reads a dev key from an env var. |
@@ -93,8 +94,11 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-08b | Origin sealing | **Function URLs move to `authorization_type = "AWS_IAM"` behind a CloudFront OAC** (`origin_type = "lambda"`), so only the distribution can invoke them. |
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
 | AD-09 | RBAC enforcement | **Role as a JWT claim; every route declares `roles` or `public` at registration or the service fails to start; ownership filtered in SQL for lists and checked by per-service policy for single rows; `404` for unseen, `403` for seen-but-forbidden; frontend takes permitted actions from the API.** |
+| AD-10 | Frontend dependencies | **MUI, React Router, React Responsive, MUI icons, self-hosted fonts; no React Query, form, date, or drag-and-drop libraries; Vitest/RTL/Cypress; Allman enforced by `@stylistic`.** |
 | AD-11 | Test stack | **pytest + `pytest-cov` (backend), Vitest + React Testing Library (frontend), Cypress (E2E).** Coverage thresholds enforced in tool config, so a run below target fails. |
 | AD-12 | Errors and validation | **Envelope `{error: {code, message, fields?, request_id}}` everywhere; fixed code table (400/401/403/404/405/409/500); `500` never leaks detail; Pydantic v2 for bodies; one `_shared/http.py` entry wrapper maps every exception.** |
+| AD-14 | Real-time | **Short polling (detail 20 s, dashboards 30 s, my tickets 60 s), paused when hidden.** |
+| AD-15 | PWA / AI | **Out of scope.** |
 | AD-13 | Lists | **Server-side SQL filters (incidents: status, priority, category, location, assignee, escalation, `q`); `page`/`limit` (20, max 100) with `{items, total, page, limit}`; allow-listed `sort`, default priority desc then oldest first.** |
 | AD-16 | Logging | **JSON lines from a stdlib formatter in `_shared/log.py`; one access line per request (route pattern, status, duration, ids); UUID-validated `X-Correlation-Id` echoed and logged, falling back to `request_id`; never log tokens, cookies, secrets, or bodies; no custom metrics.** |
 | AD-17 | Incident state machine | **Admin: any status → any other. Engineer, on assigned tickets only: `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`. Employee: none.** Only admins close. Entering `Blocked` requires a reason. Same-status moves rejected. New incidents start in an added `Unassigned` status; only admins assign, which moves `Unassigned → Open`; status is `Unassigned` iff no assignee. Reassignment only via `Unassigned`, reason required. |
@@ -354,16 +358,16 @@ but **none is settled until confirmed** — record the outcome here and in the R
 | AD-03 | Schema ownership and migrations | **DECIDED — private migrate Lambda, numbered SQL** |
 | AD-04 | DB access layer and connection reuse | **DECIDED — raw psycopg 3, module-scope connection** |
 | AD-05 | Intra-Lambda routing | **DECIDED — hand-rolled router in `_shared/`** |
-| AD-06 | URL/base-path convention and frontend API client | OPEN |
+| AD-06 | URL/base-path convention and frontend API client | **DECIDED — same-origin `/api`, one fetch wrapper** |
 | AD-07 | Auth mechanism and placement | **DECIDED — RS256 JWT + rotating refresh tokens** |
 | AD-08 | Browser token storage, origin sealing, token transport | **DECIDED** |
 | AD-09 | RBAC enforcement model | **DECIDED — JWT role claim, closed-by-default routes, SQL-filtered ownership** |
-| AD-10 | Frontend dependency set | OPEN |
+| AD-10 | Frontend dependency set | **DECIDED — mandated libraries plus the minimum** |
 | AD-11 | Test stack | **DECIDED — pytest, Vitest + RTL, Cypress; enforced thresholds** |
 | AD-12 | Error envelope and validation approach | **DECIDED — one envelope, fixed codes, Pydantic v2, single wrapper** |
 | AD-13 | Search, filter, and pagination design | **DECIDED — server-side filters, page/limit, allow-listed sort** |
-| AD-14 | Real-time and async scope | OPEN |
-| AD-15 | PWA and AI-integration scope | OPEN |
+| AD-14 | Real-time and async scope | **DECIDED — short polling** |
+| AD-15 | PWA and AI-integration scope | **DECIDED — out of scope** |
 | AD-16 | Observability and structured logging | **DECIDED — JSON lines, access log, correlation id** |
 
 Domain-specific, from the facility-incident problem statement:
@@ -821,6 +825,20 @@ say `/api/<service-name>`. Separately, the frontend can address services two way
   `src/services/` resolve `VITE_LAMBDA_URLS[service]` first, falling back to `VITE_API_URL`.
   Confirm the intended prefix with the organizers.
 
+#### DECIDED — same-origin `/api`, one fetch wrapper (2026-09-24)
+
+- **Relative same-origin URLs** (`/api/<service>/...`), no hostname and no `VITE_*` for the
+  API: CloudFront routes `/api/<service>*` in the cloud; locally Vite proxies `/api` →
+  `http://localhost:3001` (AD-08 work item 1). The `SameSite=Strict` refresh cookie is sent
+  only to the page's own origin, which is why. **Retires** the earlier recommendation to
+  resolve `VITE_LAMBDA_URLS` first: those calls are cross-origin (no cookie) and, since
+  AD-08b, a direct Function URL call is a `403`.
+- **`src/services/http.js` is the only network code:** access token in memory, sent as
+  `X-Access-Token`; single-flight refresh (one shared promise — also guards React 19
+  StrictMode's double effect at boot); `X-Correlation-Id` per user action; errors parsed into
+  `{status, code, message, fields, requestId}`; **`x-amz-content-sha256` = SHA-256 of every
+  `POST`/`PUT` body** (proven required through the OAC on the first cloud deploy).
+
 ### AD-07 · Auth mechanism and placement
 
 The Function URL ships as `authorization_type = "NONE"`. AD-08b changes that to `"AWS_IAM"`
@@ -1205,6 +1223,16 @@ UI, React Router, and React Responsive are required by the requirements but are 
 - **Recommendation:** thin fetch wrapper first — it satisfies the prescribed `src/services/`
   structure. Add React Query only if caching and refetch behavior start costing real time.
 
+#### DECIDED — mandated libraries plus the minimum (2026-09-24)
+
+Mandated: Material UI (+ Emotion), React Router, React Responsive; `@mui/icons-material`
+(named imports). **No** React Query (own wrapper + small polling hook), **no** form library
+(controlled inputs; the server's `fields` are the authority — zod would duplicate the
+Pydantic rules), **no** date library (`Intl`), **no** drag-and-drop in the MVP (the board uses
+`actions.transitions` buttons). Self-hosted fonts (`@fontsource`: Overpass for display,
+Atkinson Hyperlegible for text). Dev: Vitest, `@vitest/coverage-v8`, jsdom, React Testing
+Library (+ user-event, jest-dom), Cypress, `@stylistic/eslint-plugin` enforcing Allman braces.
+
 ### AD-11 · Test stack
 
 `docs/full-stack.md` says Jest + React Testing Library, but this is a Vite project where
@@ -1411,12 +1439,25 @@ an SQS dead-letter queue.
 - **Recommendation:** optimistic UI plus short polling on incident views; state the
   trade-off in the README. Pragmatic decisions are explicitly rewarded.
 
+#### DECIDED — short polling, paused when hidden (2026-09-24)
+
+No WebSockets (no infra for them). Polling: incident detail 20 s, dashboards 30 s, "my
+tickets" 60 s, timings and hotspots on demand only. Paused while the tab is hidden; refetch
+immediately after the user's own action. Side effect: a visible tab keeps the sliding 7-day
+session alive.
+
 ### AD-15 · PWA and AI-integration scope
 
 Both are listed as expected frontend capabilities; both are large relative to a workshop.
 
 - **Recommendation:** declare both out of scope in the README with reasoning, and revisit
   only if the core CRUD, auth, RBAC, search, and tests are all complete.
+
+#### DECIDED — both out of scope (2026-09-24)
+
+AI needs an external model API, which the brief rules out ("no integrations with external
+systems"); an offline PWA conflicts with the in-memory token and server-held data. Already
+listed in README → Deliberately not done. A web manifest alone could be added later at no cost.
 
 ### AD-16 · Observability and structured logging
 

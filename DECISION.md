@@ -17,6 +17,7 @@ in commit `af53415`; a date means it was settled in a working session on that da
 | AD-03 | Schema ownership and migrations | Private `backend/_migrate/` Lambda (no Function URL) invoked by Terraform during `apply`; numbered forward-only SQL + checksums | Aurora is VPC-only, so migrations must run inside it; `_` prefix keeps it off the internet; numbered files can alter tables without data loss | 2026-09-23 |
 | AD-04 | DB access layer | Raw `psycopg` 3; one module-scope connection per warm container, reopened on error; parameterized queries only; multi-row writes in one transaction | Matches the example; a Lambda container serves one request at a time, so a pool or ORM adds nothing | 2026-09-23 |
 | AD-05 | Intra-Lambda routing | Hand-rolled router in `_shared/`: method + pattern table, `404`/`405`+`Allow`, optional `/api/<service>` prefix and `//` normalised | No dependency or cold-start cost; fully explainable and unit-testable; Powertools' extras belong to AD-12/AD-16 | 2026-09-23 |
+| AD-06 | API path and client | Same-origin relative `/api/<service>`; single `http.js` wrapper (in-memory token, single-flight refresh, correlation id, error envelope, body hash) | The strict refresh cookie only travels same-origin; the OAC needs the body hash | 2026-09-24 |
 | AD-07 | Auth mechanism | Self-issued JWT, verified in every handler, with expiry | No new infra (not Cognito/OAuth); a required deliverable, done for real | pre-session |
 | AD-07a | Signing algorithm | RS256 | Only `auth` can mint tokens; other services verify with a public key | pre-session |
 | AD-07b | Signing key storage | Secrets Manager (cloud); env var dev key when `IS_LOCAL` | IAM grant already exists; only `auth` needs the secret | pre-session |
@@ -26,8 +27,11 @@ in commit `af53415`; a date means it was settled in a working session on that da
 | AD-08b | Origin sealing | Function URLs `AWS_IAM` behind a CloudFront OAC | Only the distribution can invoke a Lambda; direct calls get 403 | pre-session |
 | AD-08c | Access-token transport | `X-Access-Token` header, not `Authorization` | OAC's SigV4 signature occupies `Authorization` | pre-session |
 | AD-09 | RBAC enforcement | Role as JWT claim; routes declare `roles`/`public` or startup fails; lists filtered in SQL, single rows checked by service `policy.py`; `404` unseen / `403` seen-but-forbidden; UI gets permitted actions from the API | Closed by default; no fetch-then-filter leaks; sequential ids not confirmable by `403`; one copy of the rules | 2026-09-23 |
+| AD-10 | Frontend dependencies | Mandated libraries + MUI icons + self-hosted fonts; no React Query / form / date / DnD libraries | Fewer dependencies, code the team can explain; zod would duplicate server rules | 2026-09-24 |
 | AD-11 | Test stack | pytest + `pytest-cov`; Vitest + RTL; Cypress; thresholds enforced in tool config | Vitest is native to Vite (Jest needs ESM config); enforced targets fail the run instead of being ignored | 2026-09-23 |
 | AD-12 | Errors and validation | One envelope `{code, message, fields?, request_id}`; codes `bad_request`/`validation_failed` 400, `unauthenticated` 401, `forbidden` 403, `not_found` 404, `method_not_allowed` 405, `conflict` 409, `internal` 500; Pydantic v2; single `_shared/http.py` wrapper | Frontend branches on stable codes and shows field errors in place; no leaked internals; validation is where hand-rolled code breaks | 2026-09-23 |
+| AD-14 | Real-time | Short polling per view, paused when hidden | No WebSocket infrastructure; staleness bounded and visible | 2026-09-24 |
+| AD-15 | PWA and AI | Out of scope | AI needs an external API (brief forbids); offline conflicts with the auth design | 2026-09-24 |
 | AD-13 | Search, filter, pagination | Server-side SQL filters; `page`/`limit` (20, max 100); `{items, total, page, limit}`; allow-listed `sort`, default priority desc then oldest | Every persona's view differs by filter; page numbers let the UI jump; allow-list keeps sort out of SQL injection | 2026-09-23 |
 | AD-16 | Logging | JSON lines (`_shared/log.py`); one access line per request by the wrapper; UUID `X-Correlation-Id` logged and echoed; levels INFO/WARNING/ERROR, DEBUG via `LOG_LEVEL`; no secrets or bodies; no custom metrics | Queryable logs in Logs Insights; one user action traceable across calls; identical local and cloud behaviour | 2026-09-23 |
 | AD-17 | Incident state machine | Admin any→any; engineer (assigned only) `Open→In Progress`, `In Progress⇄Blocked`, `In Progress→Resolved`; employee none; only admins close | No skip keeps the acknowledged timestamp; unblock avoids admin bottleneck; no review state, so admin closing is the confirmation | 2026-09-23 |
@@ -115,6 +119,4 @@ Fixed rules recorded under a parent. AD-09, AD-12, and AD-17 have since closed; 
 
 ## Still open
 
-AD-06 · AD-10 · AD-14 · AD-15 ·
-AD-16 · AD-19 — see `AGENTS.md` → Pending architecture
-decisions.
+None — every entry in the `AGENTS.md` register is decided (2026-09-24).
