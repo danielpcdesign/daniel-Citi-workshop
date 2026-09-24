@@ -217,3 +217,45 @@ def test_invalid_report_parameters(svc, world, path, query, field):
 
 def test_health(svc, world):
     assert call(svc, world, None, "/health") == (200, {"service": "reports", "database": "ok"})
+
+
+# --- flow (M11): hourly status snapshots replayed from history ------------------------------------------
+
+def test_flow_counts_each_ticket_in_the_status_it_held_at_each_hour(svc, world):
+    # relative to now: the endpoint always covers the last 90 days
+    base = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=10)
+    moved = incident(world, status="resolved", assignee="eve", created=base)
+    # an assigned status must name its holder (schema constraint)
+    for offset, source, target, holder in [(timedelta(minutes=10), None, "unassigned", None),
+                                           (timedelta(hours=2, minutes=10), "unassigned", "open", world["eve"]),
+                                           (timedelta(hours=5, minutes=10), "open", "resolved", world["eve"])]:
+        sql("""INSERT INTO incident_status_history (incident_id, from_status, to_status, actor_id, assignee_id, created_at)
+               VALUES (%s, %s, %s, %s, %s, %s)""", (moved, source, target, world["ada"], holder, base + offset))
+    gone = incident(world, deleted=True)
+    sql("INSERT INTO incident_status_history (incident_id, to_status, actor_id, created_at) VALUES (%s, 'unassigned', %s, %s)",
+        (gone, world["ada"], base))
+
+    status, body = call(svc, world, "ada", "/flow")
+    assert status == 200 and body["bucket"] == "hour" and body["statuses"][0] == "unassigned"
+    # compared as instants: the database may answer in another time zone
+    points = {datetime.fromisoformat(p["at"]): p for p in body["points"]}
+
+    def at(hours):
+        return points[base + timedelta(hours=hours)]
+
+    # before creation nothing counts; then unassigned, open, resolved; the deleted ticket never counts
+    assert sum(at(0)[s] for s in body["statuses"]) == 0
+    assert at(1)["unassigned"] == 1 and at(3)["open"] == 1 and at(6)["resolved"] == 1
+    assert at(3)["unassigned"] == 0 and body["points"][-1]["resolved"] == 1
+    # 90 days of hours, both ends, plus a final "now" point
+    assert len(body["points"]) == 90 * 24 + 2
+    assert body["points"][0]["at"] == body["from"] and body["points"][-1]["at"] == body["to"]
+
+
+def test_flow_with_no_tickets_is_all_zero(svc, world):
+    _, body = call(svc, world, "ada", "/flow")
+    assert all(p[s] == 0 for p in body["points"] for s in body["statuses"])
+
+
+def test_flow_is_admin_only(svc, world):
+    assert call(svc, world, "eve", "/flow")[0] == 403

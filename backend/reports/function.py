@@ -151,6 +151,49 @@ def timings(request: Request) -> tuple[int, dict]:
     }
 
 
+# cumulative flow (M11): how many tickets sat in each status at every hour of the last 90 days, replayed from the
+# history. one hourly series; the frontend picks today / 7 / 30 / 90 days from it (user's call). each history row
+# holds its status until the ticket's next row, so a snapshot counts the spans that cover it. fine at workshop scale:
+# ~2,200 ticks against every span; a real system would pre-aggregate
+FLOW_DAYS = 90
+
+
+@router.on("GET", "/flow", roles={"admin"})
+def flow(request: Request) -> tuple[int, dict]:
+    rows = get_conn().execute(
+        """
+        WITH ticks AS (
+            SELECT generate_series(date_trunc('hour', now()) - make_interval(days => %(days)s),
+                                   date_trunc('hour', now()), interval '1 hour') AS at
+            UNION
+            SELECT now()
+        ),
+        spans AS (
+            SELECT h.to_status AS status, h.created_at AS since,
+                   lead(h.created_at) OVER (PARTITION BY h.incident_id ORDER BY h.created_at, h.id) AS until
+            FROM incident_status_history h
+            JOIN incidents i ON i.id = h.incident_id
+            WHERE i.deleted_at IS NULL
+        )
+        SELECT t.at, s.status, count(s.status)
+        FROM ticks t
+        LEFT JOIN spans s ON s.since <= t.at AND (s.until IS NULL OR s.until > t.at)
+        GROUP BY t.at, s.status
+        ORDER BY t.at
+        """,
+        {"days": FLOW_DAYS},
+    ).fetchall()
+    # every tick present with every status, zero included, oldest first
+    points: dict = {}
+    for at, status, count in rows:
+        point = points.setdefault(at, {"at": at, **{name: 0 for name in STATUSES}})
+        if status is not None:
+            point[status] = count
+    series = list(points.values())
+    return 200, {"bucket": "hour", "from": series[0]["at"], "to": series[-1]["at"],
+                 "statuses": list(STATUSES), "points": series}
+
+
 # which incidents are blocked or escalated, and why (a required question)
 @router.on("GET", "/attention", roles={"admin"})
 def attention(request: Request) -> tuple[int, dict]:

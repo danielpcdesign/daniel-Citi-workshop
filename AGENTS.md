@@ -94,7 +94,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-08b | Origin sealing | **Function URLs move to `authorization_type = "AWS_IAM"` behind a CloudFront OAC** (`origin_type = "lambda"`), so only the distribution can invoke them. |
 | AD-08c | Access-token transport | **`X-Access-Token` header, not `Authorization`.** OAC SigV4 signing claims `Authorization` for the signature, so the two cannot share it. Handlers read `X-Access-Token`; `Authorization` belongs to the infrastructure. |
 | AD-09 | RBAC enforcement | **Role as a JWT claim; every route declares `roles` or `public` at registration or the service fails to start; ownership filtered in SQL for lists and checked by per-service policy for single rows; `404` for unseen, `403` for seen-but-forbidden; frontend takes permitted actions from the API.** |
-| AD-10 | Frontend dependencies | **MUI, React Router, React Responsive, MUI icons, self-hosted fonts; no React Query, form, date, or drag-and-drop libraries; Vitest/RTL/Cypress; Allman enforced by `@stylistic`.** |
+| AD-10 | Frontend dependencies | **MUI, React Router, React Responsive, MUI icons, self-hosted fonts, `@mui/x-charts` (amended 2026-09-24); no React Query, form, date, or drag-and-drop libraries; Vitest/RTL/Cypress; Allman enforced by `@stylistic`.** |
 | AD-11 | Test stack | **pytest + `pytest-cov` (backend), Vitest + React Testing Library (frontend), Cypress (E2E).** Coverage thresholds enforced in tool config, so a run below target fails. |
 | AD-12 | Errors and validation | **Envelope `{error: {code, message, fields?, request_id}}` everywhere; fixed code table (400/401/403/404/405/409/500); `500` never leaks detail; Pydantic v2 for bodies; one `_shared/http.py` entry wrapper maps every exception.** |
 | AD-14 | Real-time | **Short polling (detail 20 s, dashboards 30 s, my tickets 60 s), paused when hidden.** |
@@ -1261,6 +1261,14 @@ Pydantic rules), **no** date library (`Intl`), **no** drag-and-drop in the MVP (
 `actions.transitions` buttons). Self-hosted fonts (`@fontsource`: Overpass for display,
 Atkinson Hyperlegible for text). Dev: Vitest, `@vitest/coverage-v8`, jsdom, React Testing
 Library (+ user-event, jest-dom), Cypress, `@stylistic/eslint-plugin` enforcing Allman braces.
+
+#### AMENDED — charts: `@mui/x-charts` (2026-09-24, user's call after the demo)
+
+Adds MUI's official chart package for the cumulative flow diagram (M11/AD-19). Chosen over a
+hand-drawn SVG chart: it follows the MUI mandate and brings axes, legend, and tooltips without
+our own chart code. Cost: a larger bundle, and a reversal of "no chart dependency" that must
+be defended as a deliberate trade — richer, consistent charts over fewer dependencies.
+Everything else in this decision stands.
 
 ### AD-11 · Test stack
 
