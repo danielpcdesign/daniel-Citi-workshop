@@ -283,7 +283,7 @@ export default function DashboardPage()
                         <Box id={SECTION.hotspots} tabIndex={-1} sx={anchorSx}>
                             <DashboardSection
                                 id="hotspots-heading"
-                                title="Where problems recur"
+                                title="Where problems occur"
                                 intro="Places with the most tickets, closed ones included."
                                 action={<Button variant="outlined" size="small" onClick={hotspots.reload}>Refresh hotspots</Button>}
                                 state={hotspots}

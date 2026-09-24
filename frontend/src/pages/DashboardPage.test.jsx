@@ -150,7 +150,7 @@ describe('DashboardPage for an admin', () =>
         expect(timings).toHaveTextContent('Median of 1 ticket;')
         expect(timings).toHaveTextContent('Not measured yet')
 
-        const hotspots = screen.getByRole('region', { name: 'Where problems recur' })
+        const hotspots = screen.getByRole('region', { name: 'Where problems occur' })
         expect(within(hotspots).getByRole('list', { name: 'Incidents by buildings' })).toHaveTextContent('Old wing (archived)')
         const floors = within(hotspots).getByRole('list', { name: 'Incidents by floors' })
         expect(floors).toHaveTextContent('Live HQ, Floor 3')
@@ -242,7 +242,7 @@ describe('DashboardPage for an engineer', () =>
         expect(await screen.findByRole('region', { name: 'Tickets by status' })).toBeInTheDocument()
         expect(screen.queryByRole('region', { name: 'Needs attention' })).not.toBeInTheDocument()
         expect(screen.queryByRole('region', { name: 'How fast tickets move' })).not.toBeInTheDocument()
-        expect(screen.queryByRole('region', { name: 'Where problems recur' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('region', { name: 'Where problems occur' })).not.toBeInTheDocument()
         expect(getAttention).not.toHaveBeenCalled()
         expect(getTimings).not.toHaveBeenCalled()
         expect(getHotspots).not.toHaveBeenCalled()

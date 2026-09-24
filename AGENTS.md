@@ -1778,9 +1778,7 @@ Lookup > History.
   scroll wrappers are now `position: relative`. The dashboard page is 1320 px wide (dashboard
   only).
 
-**Pending — not settled here.** The nav labels this section "Where problems occur"; the
-hotspots heading a few rows down reads "Where problems recur". Not reconciled — needs a user
-call on which wording stands before it can be recorded as decided.
+**Wording — decided 2026-09-24 (user):** the nav entry and the hotspots heading both read "Where problems occur".
 
 #### Built 2026-09-24 (M11) — admin "Who's available" (commit `bc87575`)
 
