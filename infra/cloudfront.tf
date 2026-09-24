@@ -16,6 +16,15 @@ resource "aws_cloudfront_origin_access_control" "lambda" {
   signing_protocol                  = "sigv4"
 }
 
+# spa deep links: rewrites client-side routes to /index.html on the s3 behavior only, so api errors pass through
+resource "aws_cloudfront_function" "spa_rewrite" {
+  count   = data.aws_caller_identity.this.id != "000000000000" ? 1 : 0
+  name    = format("%s-spa-rewrite-%s", var.aws_project, local.app_id)
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = file("${path.module}/spa-rewrite.js")
+}
+
 resource "aws_cloudfront_distribution" "this" {
   count               = data.aws_caller_identity.this.id != "000000000000" ? 1 : 0
   enabled             = true
@@ -50,12 +59,8 @@ resource "aws_cloudfront_distribution" "this" {
     }
   }
 
-  custom_error_response {
-    error_code            = 404
-    error_caching_min_ttl = 300
-    response_code         = 200
-    response_page_path    = "/index.html"
-  }
+  # no custom_error_response: it applies to every behavior, so it turned api 404s into 200 index.html, and it
+  # missed deep links anyway (s3 answers a missing key with 403 through the OAC). spa_rewrite handles routes
 
   # logging_config {
   #   include_cookies = false
@@ -107,6 +112,11 @@ resource "aws_cloudfront_distribution" "this" {
 
     target_origin_id       = local.origin_id
     viewer_protocol_policy = "redirect-to-https"
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_rewrite[0].arn
+    }
 
     forwarded_values {
       query_string = false
