@@ -21,6 +21,13 @@ vi.mock('./services/reportService.js', () => ({
     getTimings: vi.fn(() => new Promise(() => undefined)),
 }))
 
+vi.mock('./services/engineerService.js', () => ({
+    listEngineersByWorkload: vi.fn(() => new Promise(() => undefined)),
+    getEngineer: vi.fn(() => new Promise(() => undefined)),
+    setAvailability: vi.fn(),
+}))
+vi.mock('./services/userService.js', () => ({ searchEmployees: vi.fn(() => new Promise(() => undefined)), changeRole: vi.fn() }))
+
 function renderApp(route, auth)
 {
     return render(
@@ -75,6 +82,32 @@ describe('routing and guards', () =>
         renderApp('/dashboard', fakeAuth())
         expect(screen.getByTestId('location')).toHaveTextContent('/tickets')
         expect(await screen.findByRole('heading', { name: 'My tickets' })).toBeInTheDocument()
+    })
+
+    it('opens the engineer pages for an admin only; anyone else lands on their own start page', async () =>
+    {
+        renderApp('/engineers', fakeAuth({ user: ADMIN }))
+        expect(await screen.findByRole('heading', { name: 'Engineers', level: 1 })).toBeInTheDocument()
+        expect(screen.getByTestId('location')).toHaveTextContent('/engineers')
+    })
+
+    it('opens an engineer profile for an admin', () =>
+    {
+        renderApp('/engineers/6', fakeAuth({ user: ADMIN }))
+        expect(screen.getByTestId('location')).toHaveTextContent('/engineers/6')
+        expect(screen.getByText('Loading the engineer')).toBeInTheDocument()
+    })
+
+    it('sends an engineer away from the engineer pages to the dashboard', () =>
+    {
+        renderApp('/engineers', fakeAuth({ user: ENGINEER }))
+        expect(screen.getByTestId('location')).toHaveTextContent('/dashboard')
+    })
+
+    it('sends an employee away from an engineer profile to their tickets', () =>
+    {
+        renderApp('/engineers/6', fakeAuth())
+        expect(screen.getByTestId('location')).toHaveTextContent('/tickets')
     })
 
     it('shows the register page and a not-found page', () =>

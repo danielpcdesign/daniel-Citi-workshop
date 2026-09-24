@@ -1,23 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import DashboardPage from './DashboardPage.jsx'
+import EngineersPage from './EngineersPage.jsx'
 import { ApiError } from '../services/http.js'
 import { listEngineersByWorkload, setAvailability } from '../services/engineerService.js'
-import { getAttention, getBoard, getHotspots, getSummary, getTimings } from '../services/reportService.js'
 import { changeRole, searchEmployees } from '../services/userService.js'
-import { ADMIN, ENGINEER, fakeAuth, renderPage } from '../test/render.jsx'
+import { ADMIN, fakeAuth, renderPage } from '../test/render.jsx'
 
-vi.mock('../services/reportService.js', () => ({
-    getSummary: vi.fn(),
-    getBoard: vi.fn(),
-    getAttention: vi.fn(),
-    getHotspots: vi.fn(),
-    getTimings: vi.fn(),
-}))
 vi.mock('../services/engineerService.js', () => ({ listEngineersByWorkload: vi.fn(), setAvailability: vi.fn() }))
 vi.mock('../services/userService.js', () => ({ searchEmployees: vi.fn(), changeRole: vi.fn() }))
-vi.mock('../services/incidentService.js', () => ({ listIncidents: vi.fn(), getIncident: vi.fn() }))
 
 const ENGINEERS = [
     { id: 7, email: 'sofia@acme.inc', full_name: 'Sofia Alvarez', is_available: true, workload: 0 },
@@ -32,7 +23,7 @@ function page(items)
 
 function renderAs(user)
 {
-    return renderPage(<DashboardPage />, { route: '/dashboard', auth: fakeAuth({ user }) })
+    return renderPage(<EngineersPage />, { route: '/engineers', auth: fakeAuth({ user }) })
 }
 
 function section()
@@ -42,22 +33,6 @@ function section()
 
 beforeEach(() =>
 {
-    getSummary.mockResolvedValue({
-        total: 0,
-        by_status: { unassigned: 0, open: 0, in_progress: 0, blocked: 0, resolved: 0, closed: 0 },
-        by_priority: { low: 0, medium: 0, high: 0, critical: 0 },
-        by_category: {},
-        by_escalation: { none: 0, pending: 0, granted: 0, declined: 0 },
-        oldest_active: null,
-    })
-    getBoard.mockResolvedValue([])
-    getAttention.mockResolvedValue({ blocked: [], escalated: [] })
-    getHotspots.mockResolvedValue({ buildings: [], floors: [], seats: [] })
-    getTimings.mockResolvedValue({
-        time_to_assign: { count: 0, median_seconds: null, average_seconds: null },
-        time_to_acknowledge: { count: 0, median_seconds: null, average_seconds: null },
-        time_to_resolve: { count: 0, median_seconds: null, average_seconds: null },
-    })
     listEngineersByWorkload.mockResolvedValue(page(ENGINEERS))
     searchEmployees.mockResolvedValue(page([]))
     setAvailability.mockResolvedValue({})
@@ -78,18 +53,8 @@ describe("Who's available", () =>
         expect(within(rows[0]).getByRole('switch', { name: 'Sofia Alvarez takes new tickets' })).toBeChecked()
         expect(team).toHaveTextContent('2 of 3 engineers are taking new work.')
         expect(team).toHaveTextContent("Engineers marked unavailable can't be assigned new tickets. Tickets they already hold stay with them.")
-        const nav = screen.getByRole('navigation', { name: 'Dashboard sections' })
-        expect(within(nav).getByRole('link', { name: "Who's available" })).toHaveAttribute('href', '#dash-team')
-    })
-
-    it('is not shown to an engineer, and never asks for the engineer list', async () =>
-    {
-        renderAs(ENGINEER)
-        await screen.findByRole('region', { name: 'Right now' })
-        expect(screen.queryByRole('region', { name: "Who's available" })).not.toBeInTheDocument()
-        expect(screen.queryByRole('link', { name: "Who's available" })).not.toBeInTheDocument()
-        expect(listEngineersByWorkload).not.toHaveBeenCalled()
-        expect(searchEmployees).not.toHaveBeenCalled()
+        // each name opens the read-only view of that engineer's work
+        expect(within(rows[2]).getByRole('link', { name: 'Priya Nair' })).toHaveAttribute('href', '/engineers/5')
     })
 
     it('sets availability and re-reads the table', async () =>
@@ -167,22 +132,18 @@ describe("Who's available", () =>
         expect(await screen.findByRole('dialog')).toHaveTextContent('Their 1 active ticket will go back to Unassigned for reassignment.')
     })
 
-    it('demotes on confirm, lists the tickets sent back to triage, and re-reads the counts', async () =>
+    it('demotes on confirm, lists the tickets sent back to triage, and re-reads the list', async () =>
     {
         const user = userEvent.setup()
         changeRole.mockResolvedValue({ user: { id: 5, role: 'employee' }, unassigned_incidents: [12, 40] })
         renderAs(ADMIN)
         const team = await section()
-        await waitFor(() => expect(getBoard).toHaveBeenCalledTimes(1))
         await user.click(await within(team).findByRole('button', { name: 'Demote Priya Nair' }))
         await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Demote' }))
 
         expect(changeRole).toHaveBeenCalledWith(5, 'employee')
         expect(await within(team).findByText('Priya Nair is now an employee. Returned to triage: INC-12, INC-40.')).toBeInTheDocument()
-        await waitFor(() => expect(getBoard).toHaveBeenCalledTimes(2))
-        expect(getSummary).toHaveBeenCalledTimes(2)
-        expect(getAttention).toHaveBeenCalledTimes(2)
-        expect(listEngineersByWorkload).toHaveBeenCalledTimes(2)
+        await waitFor(() => expect(listEngineersByWorkload).toHaveBeenCalledTimes(2))
     })
 
     it('says nothing is reassigned for an engineer with no tickets', async () =>
@@ -216,6 +177,7 @@ describe("Who's available", () =>
         listEngineersByWorkload.mockResolvedValue(page([]))
         renderAs(ADMIN)
         const team = await section()
+        expect(screen.getByRole('heading', { name: 'Engineers', level: 1 })).toBeInTheDocument()
         expect(await within(team).findByText('No engineers yet. Find an employee above to make the first one.')).toBeInTheDocument()
     })
 
@@ -227,5 +189,6 @@ describe("Who's available", () =>
         const list = await within(team).findByRole('list', { name: 'Engineers' })
         expect(within(list).getAllByRole('listitem')).toHaveLength(3)
         expect(within(list).getByRole('button', { name: 'Demote Priya Nair' })).toBeInTheDocument()
+        expect(within(list).getByRole('link', { name: 'Priya Nair' })).toHaveAttribute('href', '/engineers/5')
     })
 })

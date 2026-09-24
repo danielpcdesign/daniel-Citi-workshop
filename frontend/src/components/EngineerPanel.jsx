@@ -20,8 +20,8 @@ function returnedLine(name, incidentIds)
 }
 
 // who can take work and who holds it; every change is the server's call, then the table is re-read (AD-09)
-// onChanged: the engineer list reloads; onRolesChanged: a demotion also moved tickets, so the counts and board reload too
-export default function EngineerPanel({ engineers, onChanged, onRolesChanged })
+// onChanged: re-read the engineer list after any availability or role change
+export default function EngineerPanel({ engineers, onChanged })
 {
     const [pendingId, setPendingId] = useState(null)
     const [promoting, setPromoting] = useState(false)
@@ -82,7 +82,7 @@ export default function EngineerPanel({ engineers, onChanged, onRolesChanged })
             setDemoting({ engineer: null, busy: false, error: null })
             setError(null)
             setNotice(returnedLine(engineer.full_name, result.unassigned_incidents || []))
-            await onRolesChanged()
+            await onChanged()
         }
         catch (failure)
         {

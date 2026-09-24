@@ -23,3 +23,9 @@ export function setAvailability(engineerId, isAvailable, options = {})
 {
     return http.put(`/api/engineers/${engineerId}/availability`, { is_available: isAvailable }, options)
 }
+
+// one engineer's profile; a user who is not an engineer answers 404, like an unknown id (M7)
+export function getEngineer(engineerId, options = {})
+{
+    return http.get(`/api/engineers/${engineerId}`, options)
+}

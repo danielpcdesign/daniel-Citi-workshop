@@ -63,6 +63,17 @@ describe('reportService', () =>
         expect(new Set(calls().map((call) => call.correlationId)).size).toBe(1)
     })
 
+    it('narrows every column by the same filters, over the columns asked for', async () =>
+    {
+        fetchMock.mockImplementation(async () => json({ items: [], total: 2, page: 1, limit: BOARD_COLUMN_LIMIT }))
+        const columns = await getBoard({ assignee_id: 6, statuses: ['open', 'closed'] })
+        expect(columns).toEqual([{ status: 'open', items: [], total: 2 }, { status: 'closed', items: [], total: 2 }])
+        expect(calls().map((call) => call.url)).toEqual([
+            `/api/incidents?assignee_id=6&status=open&limit=${BOARD_COLUMN_LIMIT}`,
+            `/api/incidents?assignee_id=6&status=closed&sort=-updated_at&limit=${BOARD_COLUMN_LIMIT}`,
+        ])
+    })
+
     it('passes the server error envelope through', async () =>
     {
         fetchMock.mockImplementation(async () => json({ error: { code: 'forbidden', message: 'admins only', request_id: 'r-1' } }, 403))

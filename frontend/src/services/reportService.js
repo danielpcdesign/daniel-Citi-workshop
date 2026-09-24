@@ -36,13 +36,14 @@ function boardSort(status)
 }
 
 // one list request per column, so each column carries its own total for "+N more" (AD-13);
-// one correlation id ties the six requests to the single refresh that caused them (AD-16)
-export async function getBoard(options = {})
+// one correlation id ties the requests to the single refresh that caused them (AD-16)
+// filters narrow every column the same way (an engineer's profile: assignee_id); statuses picks the columns
+export async function getBoard({ statuses = BOARD_STATUSES, ...filters } = {}, options = {})
 {
     const correlationId = options.correlationId || newCorrelationId()
-    const pages = await Promise.all(BOARD_STATUSES.map((status) => listIncidents(
-        { status: [status], sort: boardSort(status), limit: BOARD_COLUMN_LIMIT },
+    const pages = await Promise.all(statuses.map((status) => listIncidents(
+        { ...filters, status: [status], sort: boardSort(status), limit: BOARD_COLUMN_LIMIT },
         { ...options, correlationId },
     )))
-    return BOARD_STATUSES.map((status, index) => ({ status, items: pages[index].items, total: pages[index].total }))
+    return statuses.map((status, index) => ({ status, items: pages[index].items, total: pages[index].total }))
 }

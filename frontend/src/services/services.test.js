@@ -12,7 +12,7 @@ import {
 } from './incidentService.js'
 import { addNote, deleteNote, editNote, listNotes } from './noteService.js'
 import { listBuildings, listFloors, listSeats } from './facilityService.js'
-import { listAvailableEngineers, listEngineers, listEngineersByWorkload, setAvailability } from './engineerService.js'
+import { getEngineer, listAvailableEngineers, listEngineers, listEngineersByWorkload, setAvailability } from './engineerService.js'
 import { changeRole, searchEmployees } from './userService.js'
 
 let fetchMock
@@ -136,6 +136,8 @@ describe('facility and engineer services', () =>
 
     it('manages engineers and roles', async () =>
     {
+        await getEngineer(5)
+        expect(lastCall()).toEqual({ url: '/api/engineers/5', method: 'GET', body: undefined })
         await setAvailability(5, false)
         expect(lastCall()).toEqual({ url: '/api/engineers/5/availability', method: 'PUT', body: { is_available: false } })
         await searchEmployees('ali')

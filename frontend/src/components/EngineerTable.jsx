@@ -1,8 +1,8 @@
+import { Link as RouterLink } from 'react-router-dom'
 import { useMediaQuery } from 'react-responsive'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import FormControlLabel from '@mui/material/FormControlLabel'
-import Switch from '@mui/material/Switch'
+import Link from '@mui/material/Link'
 import Table from '@mui/material/Table'
 import TableBody from '@mui/material/TableBody'
 import TableCell from '@mui/material/TableCell'
@@ -10,6 +10,7 @@ import TableHead from '@mui/material/TableHead'
 import TableRow from '@mui/material/TableRow'
 import Typography from '@mui/material/Typography'
 import { MOBILE_QUERY } from './AppShell.jsx'
+import AvailabilitySwitch from './AvailabilitySwitch.jsx'
 import { srOnly, tokens } from '../theme.js'
 
 // the count is the fact; the bar only makes the spread across engineers visible at a glance
@@ -25,21 +26,13 @@ function Workload({ count, most })
     )
 }
 
-function AvailabilitySwitch({ engineer, pending, onToggle })
+// the name opens the read-only view of that engineer's work
+function ProfileLink({ engineer })
 {
     return (
-        <FormControlLabel
-            sx={{ m: 0 }}
-            control={(
-                <Switch
-                    checked={engineer.is_available}
-                    disabled={pending}
-                    onChange={(event) => onToggle(engineer, event.target.checked)}
-                    slotProps={{ input: { 'aria-label': `${engineer.full_name} takes new tickets` } }}
-                />
-            )}
-            label={engineer.is_available ? 'Available' : 'Not taking new work'}
-        />
+        <Link component={RouterLink} to={`/engineers/${engineer.id}`} sx={{ color: 'text.primary', fontWeight: 700 }}>
+            {engineer.full_name}
+        </Link>
     )
 }
 
@@ -55,7 +48,7 @@ export default function EngineerTable({ engineers, pendingId, onToggle, onDemote
             <Box component="ul" aria-label="Engineers" sx={{ m: 0, p: 0 }}>
                 {engineers.map((engineer) => (
                     <Box component="li" key={engineer.id} sx={{ listStyle: 'none', py: 1.5, borderTop: `1px solid ${tokens.rule}` }}>
-                        <Typography variant="h6" component="p">{engineer.full_name}</Typography>
+                        <Typography variant="h6" component="p"><ProfileLink engineer={engineer} /></Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{engineer.email}</Typography>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
                             <Typography variant="body2">Active tickets</Typography>
@@ -85,7 +78,7 @@ export default function EngineerTable({ engineers, pendingId, onToggle, onDemote
             <TableBody>
                 {engineers.map((engineer) => (
                     <TableRow key={engineer.id}>
-                        <TableCell sx={{ fontWeight: 700 }}>{engineer.full_name}</TableCell>
+                        <TableCell><ProfileLink engineer={engineer} /></TableCell>
                         <TableCell sx={{ color: 'text.secondary', overflowWrap: 'anywhere' }}>{engineer.email}</TableCell>
                         <TableCell>
                             <AvailabilitySwitch engineer={engineer} pending={pendingId === engineer.id} onToggle={onToggle} />

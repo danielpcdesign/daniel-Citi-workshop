@@ -10,7 +10,6 @@ import CollapsibleSection from '../components/CollapsibleSection.jsx'
 import CountBars from '../components/CountBars.jsx'
 import DashboardNav from '../components/DashboardNav.jsx'
 import DashboardSection from '../components/DashboardSection.jsx'
-import EngineerPanel from '../components/EngineerPanel.jsx'
 import ErrorNotice from '../components/ErrorNotice.jsx'
 import HotspotList from '../components/HotspotList.jsx'
 import LookupHistory from '../components/LookupHistory.jsx'
@@ -21,14 +20,13 @@ import TicketLookup from '../components/TicketLookup.jsx'
 import TimingTrack from '../components/TimingTrack.jsx'
 import { useActiveSection } from '../hooks/useActiveSection.js'
 import { useAuth } from '../hooks/useAuth.js'
-import { usePolling } from '../hooks/usePolling.js'
-import { listEngineersByWorkload } from '../services/engineerService.js'
+import { LIVE_POLL_MS, usePolling } from '../hooks/usePolling.js'
 import { getAttention, getBoard, getHotspots, getSummary, getTimings } from '../services/reportService.js'
 import { CATEGORY_LABEL, PRIORITY_LABEL, fmtRef } from '../utils/format.js'
 import { scrollToSection } from '../utils/scroll.js'
 import { radius, tokens } from '../theme.js'
 
-export const DASHBOARD_POLL_MS = 30000
+export const DASHBOARD_POLL_MS = LIVE_POLL_MS
 
 // the section anchors the dashboard nav jumps to
 const SECTION = {
@@ -36,7 +34,6 @@ const SECTION = {
     status: 'dash-status',
     timings: 'dash-timings',
     hotspots: 'dash-hotspots',
-    team: 'dash-team',
     lookup: 'dash-lookup',
     history: 'dash-history',
 }
@@ -51,7 +48,6 @@ const NAV = {
         { id: SECTION.status, label: 'Tickets by status' },
         { id: SECTION.timings, label: 'How fast tickets move' },
         { id: SECTION.hotspots, label: 'Where problems occur' },
-        { id: SECTION.team, label: "Who's available" },
         { id: SECTION.lookup, label: 'Lookup tool', children: LOOKUP_CHILDREN },
     ],
     engineer: [
@@ -105,11 +101,6 @@ export default function DashboardPage()
     const timings = usePolling(loadTimings, null)
     const loadHotspots = useCallback(() => (isAdmin ? getHotspots() : Promise.resolve(null)), [isAdmin])
     const hotspots = usePolling(loadHotspots, null)
-    // who can take work changes as tickets move, so it polls with the live views and re-reads after every change (AD-14)
-    const loadEngineers = useCallback(() => (isAdmin ? listEngineersByWorkload() : Promise.resolve(null)), [isAdmin])
-    const engineers = usePolling(loadEngineers, isAdmin ? DASHBOARD_POLL_MS : null)
-    // a demotion sends tickets back to triage: every view that counts them is re-read
-    const afterRoleChange = () => Promise.all([engineers.reload(), summary.reload(), board.reload(), attention.reload()])
     // the breakdowns reuse the summary; its failure is already shown once, above the plate
     const summaryShown = { ...summary, error: null }
 
@@ -290,23 +281,6 @@ export default function DashboardPage()
                                 loadingLabel="Loading hotspots"
                             >
                                 {(data) => <HotspotList hotspots={data} />}
-                            </DashboardSection>
-                        </Box>
-                        <Box id={SECTION.team} tabIndex={-1} sx={anchorSx}>
-                            <DashboardSection
-                                id="team-heading"
-                                title="Who's available"
-                                intro="Engineers, least loaded first, with the tickets each is working on."
-                                state={engineers}
-                                loadingLabel="Loading engineers"
-                            >
-                                {(data) => (
-                                    <EngineerPanel
-                                        engineers={data.items}
-                                        onChanged={engineers.reload}
-                                        onRolesChanged={afterRoleChange}
-                                    />
-                                )}
                             </DashboardSection>
                         </Box>
                     </>

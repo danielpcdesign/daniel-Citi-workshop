@@ -5,6 +5,8 @@ import PublicOnly from './components/PublicOnly.jsx'
 import RequireAuth from './components/RequireAuth.jsx'
 import { DASHBOARD_ROLES } from './utils/roles.js'
 import DashboardPage from './pages/DashboardPage.jsx'
+import EngineerProfilePage from './pages/EngineerProfilePage.jsx'
+import EngineersPage from './pages/EngineersPage.jsx'
 import IncidentPage from './pages/IncidentPage.jsx'
 import MyTicketsPage from './pages/MyTicketsPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
@@ -24,6 +26,9 @@ export default function App()
                     path="/dashboard"
                     element={<RequireAuth roles={DASHBOARD_ROLES} redirectTo="/tickets"><DashboardPage /></RequireAuth>}
                 />
+                {/* admin only; anyone else lands on their own home page (AD-09) */}
+                <Route path="/engineers" element={<RequireAuth roles={['admin']} redirectTo="/"><EngineersPage /></RequireAuth>} />
+                <Route path="/engineers/:id" element={<RequireAuth roles={['admin']} redirectTo="/"><EngineerProfilePage /></RequireAuth>} />
                 <Route path="/tickets" element={<RequireAuth><MyTicketsPage /></RequireAuth>} />
                 <Route path="/report" element={<RequireAuth><ReportPage /></RequireAuth>} />
                 <Route path="/incidents/:id" element={<RequireAuth><IncidentPage /></RequireAuth>} />

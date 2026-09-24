@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+// every live view (dashboard, engineers, a profile) refreshes on the same beat (AD-14)
+export const LIVE_POLL_MS = 30000
+
 // load now, then every intervalMs while the tab is visible; reload on return to the tab (AD-14)
 // the loader's identity is the dependency: wrap it in useCallback with what it reads
 // intervalMs null: load once and on reload() only, for reports AD-14 keeps on demand (timings, hotspots)

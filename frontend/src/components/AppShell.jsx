@@ -20,6 +20,7 @@ export const MOBILE_QUERY = '(max-width: 767px)'
 // roles: shown only to these; the route guard and the server still decide (AD-09)
 const NAV = [
     { to: '/dashboard', label: 'Dashboard', roles: DASHBOARD_ROLES },
+    { to: '/engineers', label: 'Engineers', roles: ['admin'] },
     { to: '/tickets', label: 'My tickets' },
     { to: '/report', label: 'Report a problem' },
 ]

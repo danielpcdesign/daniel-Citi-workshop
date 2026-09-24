@@ -18,11 +18,7 @@ vi.mock('../services/reportService.js', () => ({
 }))
 vi.mock('../services/incidentService.js', () => ({ listIncidents: vi.fn(), getIncident: vi.fn() }))
 vi.mock('../services/facilityService.js', () => ({ listBuildings: vi.fn() }))
-vi.mock('../services/engineerService.js', () => ({
-    listEngineers: vi.fn(),
-    listEngineersByWorkload: vi.fn(async () => ({ items: [], total: 0, page: 1, limit: 100 })),
-}))
-vi.mock('../services/userService.js', () => ({ searchEmployees: vi.fn(async () => ({ items: [], total: 0, page: 1, limit: 10 })), changeRole: vi.fn() }))
+vi.mock('../services/engineerService.js', () => ({ listEngineers: vi.fn() }))
 
 const DEFAULT_QUERY = { sort: '-priority,created_at', page: 1, limit: 20 }
 const ROWS = [
@@ -125,11 +121,13 @@ describe('Dashboard section nav', () =>
             'Tickets by status',
             'How fast tickets move',
             'Where problems occur',
-            'Who\'s available',
             'Lookup tool',
             'History',
         ])
         expect(screen.getByRole('link', { name: 'Needs attention / Right now' })).toHaveAttribute('aria-current', 'location')
+        // engineers moved to their own page (/engineers)
+        expect(screen.queryByRole('region', { name: "Who's available" })).not.toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: "Who's available" })).not.toBeInTheDocument()
     })
 
     it('lists only the sections an engineer has', async () =>
