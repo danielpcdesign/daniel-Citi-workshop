@@ -108,3 +108,13 @@ export const theme = createTheme({
         },
     },
 })
+
+// read by screen readers, not drawn: context that sighted users get from layout
+export const srOnly = {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    overflow: 'hidden',
+    clip: 'rect(0 0 0 0)',
+    whiteSpace: 'nowrap',
+}

@@ -8,6 +8,7 @@ import Typography from '@mui/material/Typography'
 import AuthCard from '../components/AuthCard.jsx'
 import ErrorNotice from '../components/ErrorNotice.jsx'
 import { useAuth } from '../hooks/useAuth.js'
+import { homePath } from '../utils/roles.js'
 
 export default function SignInPage()
 {
@@ -26,8 +27,8 @@ export default function SignInPage()
         setError(null)
         try
         {
-            await signIn(email.trim(), password)
-            navigate(location.state?.from || '/tickets', { replace: true })
+            const user = await signIn(email.trim(), password)
+            navigate(location.state?.from || homePath(user), { replace: true })
         }
         catch (signInError)
         {

@@ -13,10 +13,13 @@ import MenuIcon from '@mui/icons-material/Menu'
 import { useAuth } from '../hooks/useAuth.js'
 import { tokens } from '../theme.js'
 import { hardNavigate } from '../utils/browser.js'
+import { DASHBOARD_ROLES, homePath } from '../utils/roles.js'
 
 export const MOBILE_QUERY = '(max-width: 767px)'
 
+// roles: shown only to these; the route guard and the server still decide (AD-09)
 const NAV = [
+    { to: '/dashboard', label: 'Dashboard', roles: DASHBOARD_ROLES },
     { to: '/tickets', label: 'My tickets' },
     { to: '/report', label: 'Report a problem' },
 ]
@@ -40,6 +43,7 @@ export default function AppShell({ children })
     const { user, signOut } = useAuth()
     const isMobile = useMediaQuery({ query: MOBILE_QUERY })
     const [menuOpen, setMenuOpen] = useState(false)
+    const nav = user ? NAV.filter((item) => !item.roles || item.roles.includes(user.role)) : []
 
     const handleSignOut = async () =>
     {
@@ -72,7 +76,7 @@ export default function AppShell({ children })
                 <Box sx={{ maxWidth: 1080, mx: 'auto', px: { xs: 2, md: 4 }, height: 64, display: 'flex', alignItems: 'center', gap: 4 }}>
                     <Typography
                         component={RouterLink}
-                        to="/tickets"
+                        to={homePath(user)}
                         variant="h5"
                         sx={{ color: tokens.ink, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 1 }}
                     >
@@ -82,7 +86,7 @@ export default function AppShell({ children })
                     {user && !isMobile && (
                         <>
                             <Box component="nav" aria-label="Main" sx={{ display: 'flex', gap: 3 }}>
-                                {NAV.map((item) => (
+                                {nav.map((item) => (
                                     <NavLink key={item.to} to={item.to} style={({ isActive }) => navSx(isActive)}>
                                         {item.label}
                                     </NavLink>
@@ -110,7 +114,7 @@ export default function AppShell({ children })
                             {user.full_name}, {ROLE_LABEL[user.role] || user.role}
                         </Typography>
                         <List>
-                            {NAV.map((item) => (
+                            {nav.map((item) => (
                                 <ListItemButton key={item.to} component={NavLink} to={item.to} onClick={() => setMenuOpen(false)}>
                                     <ListItemText primary={item.label} />
                                 </ListItemButton>

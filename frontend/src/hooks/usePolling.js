@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 // load now, then every intervalMs while the tab is visible; reload on return to the tab (AD-14)
 // the loader's identity is the dependency: wrap it in useCallback with what it reads
+// intervalMs null: load once and on reload() only, for reports AD-14 keeps on demand (timings, hotspots)
 export function usePolling(loader, intervalMs)
 {
     // which loader produced the current result: a new loader (next page, other ticket) means "loading" until it answers
@@ -60,6 +61,13 @@ export function usePolling(loader, intervalMs)
         }
 
         reload()
+        if (!intervalMs)
+        {
+            return () =>
+            {
+                latestCall.current += 1
+            }
+        }
         if (document.visibilityState === 'visible')
         {
             start()

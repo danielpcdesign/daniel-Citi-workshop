@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { anyArchived, fmtAgo, fmtDateTime, fmtLocation, fmtRef, fmtStatus, latestReason, nextStep, stepIndex } from './format.js'
+import { anyArchived, fmtAgo, fmtDateTime, fmtDuration, fmtLocation, fmtRef, fmtStatus, latestReason, nextStep, stepIndex } from './format.js'
 import { fieldError, unplacedError } from './errors.js'
 
 describe('format', () =>
@@ -60,6 +60,20 @@ describe('format', () =>
         expect(nextStep({ status: 'in_progress', assignee_name: 'Eli', escalation_status: 'none' })).toBe('Eli is working on it.')
         expect(nextStep({ status: 'open', escalation_status: 'pending' })).toMatch(/The engineer has been assigned.*escalation request/)
         expect(nextStep({ status: 'weird', escalation_status: 'none' })).toBe('')
+    })
+})
+
+describe('fmtDuration', () =>
+{
+    it('writes the two largest units, stopping at the first gap', () =>
+    {
+        expect(fmtDuration(null)).toBe('Not measured yet')
+        expect(fmtDuration(0)).toBe('0 seconds')
+        expect(fmtDuration(45)).toBe('45 seconds')
+        expect(fmtDuration(5400)).toBe('1 hour 30 minutes')
+        expect(fmtDuration(90061)).toBe('1 day 1 hour')
+        expect(fmtDuration(86404)).toBe('1 day')
+        expect(fmtDuration(2 * 86400 + 7200)).toBe('2 days 2 hours')
     })
 })
 

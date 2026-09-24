@@ -5,13 +5,14 @@ const EMPLOYEE = 'live.c.emp@acme.inc'
 const ADMIN = 'live.c.admin@acme.inc'
 const ENGINEER = 'live.c.eng@acme.inc'
 
-function signIn(email)
+// each role lands on its own starting page: employees on their tickets, admins and engineers on the dashboard
+function signIn(email, landing = 'My tickets')
 {
     cy.visit('/signin')
     cy.get('input[type=email]').type(email)
     cy.get('input[type=password]').type(PASSWORD)
     cy.contains('button', 'Sign in').click()
-    cy.contains('h1', 'My tickets')
+    cy.contains('h1', landing)
 }
 
 function signOut()
@@ -55,7 +56,11 @@ describe('core journey', () =>
         cy.screenshot('1-reported')
         signOut()
 
-        signIn(ADMIN)
+        signIn(ADMIN, 'Dashboard')
+        // the board shows the most urgent, oldest tickets per status, so a new one may be below the cut
+        cy.contains('h2', 'Right now')
+        cy.get('[data-status=unassigned]').should('exist')
+        cy.contains('h2', 'Needs attention')
         cy.get('@ticket').then((path) => cy.visit(path))
         cy.contains('button', 'Assign an engineer').click()
         cy.get('[role=dialog]').within(() =>
@@ -68,7 +73,9 @@ describe('core journey', () =>
         cy.contains('live.c.eng has been assigned')
         signOut()
 
-        signIn(ENGINEER)
+        signIn(ENGINEER, 'Dashboard')
+        cy.get('[data-status=open]').should('exist')
+        cy.contains('h2', 'Needs attention').should('not.exist')
         cy.get('@ticket').then((path) => cy.visit(path))
         cy.contains('button', 'Start work').click()
         cy.contains('live.c.eng is working on it.')

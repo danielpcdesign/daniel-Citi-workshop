@@ -22,6 +22,17 @@ describe('SignInPage', () =>
         await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/incidents/3'))
     })
 
+    it('takes an admin to the dashboard when they were not heading anywhere', async () =>
+    {
+        const user = userEvent.setup()
+        const signIn = vi.fn().mockResolvedValue({ id: 1, role: 'admin' })
+        renderPage(<SignInPage />, { route: '/signin', auth: fakeAuth({ user: null, signIn }) })
+        await user.type(screen.getByLabelText(/Work email/), 'adm@acme.inc')
+        await user.type(screen.getByLabelText(/Password/), 'a long enough password')
+        await user.click(screen.getByRole('button', { name: 'Sign in' }))
+        await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/dashboard'))
+    })
+
     it('says plainly when the credentials do not match', async () =>
     {
         const user = userEvent.setup()

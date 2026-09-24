@@ -95,4 +95,18 @@ describe('usePolling', () =>
         await act(async () => vi.advanceTimersByTime(5000))
         expect(loader).toHaveBeenCalledTimes(1)
     })
+
+    it('with no interval, loads once and then only on request, even on return to the tab', async () =>
+    {
+        const loader = vi.fn().mockResolvedValue({ n: 1 })
+        const { result, unmount } = renderHook(() => usePolling(loader, null))
+        await act(async () => undefined)
+        await act(async () => vi.advanceTimersByTime(60000))
+        setVisibility('hidden')
+        setVisibility('visible')
+        expect(loader).toHaveBeenCalledTimes(1)
+        await act(async () => result.current.reload())
+        expect(loader).toHaveBeenCalledTimes(2)
+        unmount()
+    })
 })

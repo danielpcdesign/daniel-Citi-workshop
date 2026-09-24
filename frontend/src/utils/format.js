@@ -137,3 +137,37 @@ export function nextStep(incident)
     }
     return line
 }
+
+const DURATION_UNITS = [
+    ['day', 86400],
+    ['hour', 3600],
+    ['minute', 60],
+    ['second', 1],
+]
+const list = new Intl.ListFormat(undefined, { style: 'narrow', type: 'unit' })
+
+// "2 days 3 hours": the two largest units are enough to compare timings at a glance; Intl only, no date library
+export function fmtDuration(seconds)
+{
+    if (seconds === null || seconds === undefined)
+    {
+        return 'Not measured yet'
+    }
+    let remaining = Math.max(0, Math.round(seconds))
+    const parts = []
+    for (const [unit, size] of DURATION_UNITS)
+    {
+        const amount = Math.floor(remaining / size)
+        if (amount > 0 && parts.length < 2)
+        {
+            parts.push(new Intl.NumberFormat(undefined, { style: 'unit', unit, unitDisplay: 'long' }).format(amount))
+            remaining -= amount * size
+        }
+        else if (parts.length)
+        {
+            // stop at the first gap: "1 day 4 seconds" reads as more precise than it is
+            break
+        }
+    }
+    return parts.length ? list.format(parts) : '0 seconds'
+}

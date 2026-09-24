@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import AppShell from './AppShell.jsx'
-import { ENGINEER, fakeAuth, renderPage } from '../test/render.jsx'
+import { ENGINEER, EMPLOYEE, fakeAuth, renderPage } from '../test/render.jsx'
 import { hardNavigate } from '../utils/browser.js'
 
 vi.mock('../utils/browser.js', () => ({ hardNavigate: vi.fn() }))
@@ -19,12 +19,21 @@ describe('AppShell', () =>
         const user = userEvent.setup()
         const signOut = vi.fn().mockRejectedValue(new Error('offline'))
         renderPage(<AppShell><p>page</p></AppShell>, { route: '/tickets', auth: fakeAuth({ user: ENGINEER, signOut }) })
+        expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/dashboard')
         expect(screen.getByRole('link', { name: 'My tickets' })).toBeInTheDocument()
         expect(screen.getByRole('link', { name: 'Report a problem' })).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: /ACME Facilities/ })).toHaveAttribute('href', '/dashboard')
         expect(screen.getByText('Eli Engineer, Engineer')).toBeInTheDocument()
         await user.click(screen.getByRole('button', { name: 'Sign out' }))
         expect(signOut).toHaveBeenCalled()
         await waitFor(() => expect(hardNavigate).toHaveBeenCalledWith('/signin'))
+    })
+
+    it('keeps the dashboard out of an employee\'s nav', () =>
+    {
+        renderPage(<AppShell><p>page</p></AppShell>, { auth: fakeAuth({ user: EMPLOYEE }) })
+        expect(screen.queryByRole('link', { name: 'Dashboard' })).not.toBeInTheDocument()
+        expect(screen.getByRole('link', { name: /ACME Facilities/ })).toHaveAttribute('href', '/tickets')
     })
 
     it('hides the nav when nobody is signed in', () =>

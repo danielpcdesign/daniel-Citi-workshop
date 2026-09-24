@@ -4,7 +4,8 @@ import { useAuth } from '../hooks/useAuth.js'
 import PageLoader from './PageLoader.jsx'
 
 // role checks here only decide what to show; the server re-checks every request (AD-09)
-export default function RequireAuth({ roles, children })
+// redirectTo: send the wrong role somewhere useful instead of explaining the refusal
+export default function RequireAuth({ roles, redirectTo, children })
 {
     const { status, user } = useAuth()
     const location = useLocation()
@@ -19,6 +20,10 @@ export default function RequireAuth({ roles, children })
     }
     if (roles && !roles.includes(user.role))
     {
+        if (redirectTo)
+        {
+            return <Navigate to={redirectTo} replace />
+        }
         return (
             <Typography role="alert" sx={{ py: 6 }}>
                 This page is for {roles.join(' and ')} accounts. Your account is {user.role}.
