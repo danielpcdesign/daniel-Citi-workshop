@@ -1757,6 +1757,49 @@ array; locally the raw rows are also queryable via `psql` against
 `incident_status_history`; CloudWatch logs are request logs (AD-16), not ticket movement —
 they show a call was made, not what changed.
 
+#### Built 2026-09-24 (M11) — dashboard section nav and ticket lookup (commit `b16fe04`)
+
+Left sticky nav on desktop; a sideways-scrolling row pinned to the top on phones. Highlights
+the section in view via `IntersectionObserver`. Entries: Needs attention / Right now, Tickets
+by status, How fast tickets move, Where problems occur, Who's available (admin), and Lookup
+tool with History nested under it. Engineers see only Right now, Tickets by status, and
+Lookup > History.
+
+- **Lookup:** collapsed by default and not polled. Runs `GET /api/incidents` server-side with
+  `q` (300 ms debounce), multi-status, priority, category, building, engineer (admin only),
+  and escalation filters. Sorts: most urgent first (the server default), newest, oldest,
+  recently changed — status sort omitted because it would be alphabetical. 20 per page; any
+  filter change returns to page 1. **Closes the MVP "Search and filter" capability in the
+  UI.**
+- **History:** a collapsed child of Lookup; stays pending until a result is picked, then shows
+  that ticket's `HistoryTimeline`.
+- **Fixed bug:** `srOnly` in `theme.js` used `width: 1`, which MUI reads as `100%`, so the
+  dashboard was 2602 px wide in a 1280 px window. Changed to `'1px'`; the board and table
+  scroll wrappers are now `position: relative`. The dashboard page is 1320 px wide (dashboard
+  only).
+
+**Pending — not settled here.** The nav labels this section "Where problems occur"; the
+hotspots heading a few rows down reads "Where problems recur". Not reconciled — needs a user
+call on which wording stands before it can be recorded as decided.
+
+#### Built 2026-09-24 (M11) — admin "Who's available" (commit `bc87575`)
+
+Answers the AD-19 question "Which engineers are available, and how is work distributed
+across them?" and **covers "create engineer profiles" in the UI.**
+
+- **Table:** `GET /api/engineers?sort=workload`, least loaded first, with a workload bar per
+  engineer; polled at 30 s and re-read after each action.
+- **Availability switch:** `PUT /api/engineers/{id}/availability`.
+- **Make engineer:** search employees via `GET /api/auth/users?role=employee`, then
+  `PUT /api/auth/users/{id}/role {role: engineer}`.
+- **Demote:** a confirmation dialog stating how many active tickets return to `Unassigned`,
+  Cancel focused by default; sends `{role: employee}`, lists the returned tickets from
+  `unassigned_incidents`, and reloads the summary, board, and attention list. Including
+  demote, with this confirmation shape, was the user's call. **Caveat for the demo:**
+  promoting back does not return the tickets; they must be reassigned by hand.
+- **Verified 2026-09-24:** 156 Vitest tests pass, 99.48% statements / 95.82% branches; lint
+  and build clean; browser-checked locally at 1280 px and 375 px; deployed to CloudFront.
+
 ### AD-19 · Dashboard and reporting strategy
 
 "Basic dashboard/reporting per persona" — three different dashboards, plus the seven
