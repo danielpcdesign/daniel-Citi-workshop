@@ -96,7 +96,7 @@ losing every incident's history. With the `Unassigned` status (AD-17), first ass
 | AD-09 | RBAC enforcement | **Role as a JWT claim; every route declares `roles` or `public` at registration or the service fails to start; ownership filtered in SQL for lists and checked by per-service policy for single rows; `404` for unseen, `403` for seen-but-forbidden; frontend takes permitted actions from the API.** |
 | AD-10 | Frontend dependencies | **MUI, React Router, React Responsive, MUI icons, self-hosted fonts, `@mui/x-charts` (amended 2026-09-24); no React Query, form, date, or drag-and-drop libraries; Vitest/RTL/Cypress; Allman enforced by `@stylistic`.** |
 | AD-11 | Test stack | **pytest + `pytest-cov` (backend), Vitest + React Testing Library (frontend), Cypress (E2E).** Coverage thresholds enforced in tool config, so a run below target fails. |
-| AD-12 | Errors and validation | **Envelope `{error: {code, message, fields?, request_id}}` everywhere; fixed code table (400/401/403/404/405/409/500); `500` never leaks detail; Pydantic v2 for bodies; one `_shared/http.py` entry wrapper maps every exception.** |
+| AD-12 | Errors and validation | **Envelope `{error: {code, message, fields?, request_id}}` everywhere; fixed code table (400/401/403/404/405/409/500); `500` never leaks detail; Pydantic v2 for bodies; one `_shared/http.py` entry wrapper maps every exception; shared `_shared/text.py` free-text rules (length, control chars, ≥1 letter in names) plus a `psycopg.DataError → 400` safety net, added 2026-09-24.** |
 | AD-14 | Real-time | **Short polling (detail 20 s, dashboards 30 s, my tickets 60 s), paused when hidden.** |
 | AD-15 | PWA / AI | **Out of scope.** |
 | AD-13 | Lists | **Server-side SQL filters (incidents: status, priority, category, location, assignee, escalation, `q`); `page`/`limit` (20, max 100) with `{items, total, page, limit}`; allow-listed `sort`, default priority desc then oldest first.** |
@@ -1428,6 +1428,58 @@ The guide demands a "consistent format" and never specifies one.
   lines are JSON carrying route pattern, status, duration, and a caller-supplied correlation id
   distinct from the Lambda request id.
 
+#### Built 2026-09-24: shared text-rule module + `DataError` safety net
+
+Prompted by the user noticing a digits-only name was accepted and asking whether input
+could reach the database unsafely. Probed on the local stack first:
+
+- **SQL injection: not possible.** `Robert'); DROP TABLE users;--` as a name was stored
+  verbatim and the `users` table was intact — every query binds values as psycopg
+  parameters; the service's own SQL f-strings splice only fixed fragments and
+  allow-listed sort columns (AD-13), never request data.
+- **XSS: not possible.** `<img src=x onerror=…>` was stored verbatim; React escapes on
+  render and no component uses `dangerouslySetInnerHTML`.
+- **Principle carried forward: validate on input, escape on output.** Nothing is
+  stripped — a name with an apostrophe or an emoji is stored and shown as typed.
+
+**Real gaps found and fixed:**
+
+1. A NUL byte in free text (name, incident title, building name, a login email) → `500`,
+   because PostgreSQL `text` cannot hold `\x00`.
+2. No length limit on `full_name` (100k chars accepted) or incident `description`
+   (500k accepted).
+3. A digits-only name was accepted.
+
+**Fix — `backend/_shared/text.py`:** `clean(value, max, multiline)` does NFC
+normalisation, trims, rejects empty, enforces a max length, and rejects control
+characters (Unicode `Cc`; newline/tab allowed only when `multiline`). `optional()`
+treats blank as absent. `person_name()` requires at least one letter (the user's call)
+and allows only letters, digits, combining marks, spaces, and `'’-.`. Limits: name 100,
+facility name 100, title 200, reason 1000, description/notes 5000. Used by
+`auth.RegisterIn.full_name`, `incidents.IncidentIn`/`IncidentEdit` (title, description),
+`TransitionIn` and escalation reasons, `notes.NoteIn.body`, and `facilities.NameIn.name`
+— one module, not a rule re-implemented per service.
+
+**Safety net in `_shared/http.py`:** `psycopg.DataError` → `400 validation_failed`
+"a value could not be stored" — covers cases outside a Pydantic model's reach, like a
+NUL byte in a login email used only for a lookup, or numeric overflow.
+
+Existing stored rows are not retroactively changed; the rules apply on write only.
+
+Tests: new `backend/_shared/tests/test_text.py`, plus cases in `http`, `auth` (digits,
+NUL, 101 chars, `O'Brien` stored verbatim), `incidents` (model rules), and `facilities`
+(NUL and blank name → 400). **447 backend tests, 100% coverage.** Deployed — all 5
+Lambdas rebuilt, since the shared module is vendored into each (AD-02). Verified in the
+cloud: registering `"12345"` as a name → `400` "must contain at least one letter".
+
+**Frontend (`ac03253`'s follow-up commit):** `maxLength` hints matching the server
+limits — register name 100 with helper text; description 5000 and reasons 1000 with
+character counters; note edit 5000 with a counter; title 200 and facility 100 already
+set. The server stays the sole authority (AD-10: no duplicated rules); field errors from
+the envelope's `fields` still show beside the inputs. **216 Vitest tests, 99.48%
+statements / 95.96% branches** (one slow lookup test needed a 15 s timeout under
+coverage instrumentation). Deployed.
+
 ### AD-13 · Search, filter, and pagination design
 
 A required feature with no specified design.
@@ -2209,6 +2261,17 @@ The statement explicitly delegates this: "request or manage incident priority/es
   profiles the way M4 promotion does. 346 tests, 100%. Live: admin list by workload 200,
   employee 403, engineer `/me` 200, self-unavailable 200, assign refused 400, admin
   re-enable 200, assign 200.
+
+#### Registration name rule (2026-09-24)
+
+Found while probing whether user input could affect backend data (full story under
+AD-12): `RegisterIn.full_name` accepted a name of only digits. **User's call: a name
+must contain at least one letter.** Enforced by `_shared/text.py`'s `person_name()` —
+shared with the incident and facility name fields, not a rule re-written per model —
+which also allows digits, combining marks, spaces, and `'’-.` alongside letters, so
+names like `O'Brien` or `Jean-Luc` are unaffected. Registering `"12345"` now returns
+`400` with `fields.full_name: "must contain at least one letter"`, verified live in the
+cloud.
 
 ### AD-22 · Facility hierarchy modelling
 
