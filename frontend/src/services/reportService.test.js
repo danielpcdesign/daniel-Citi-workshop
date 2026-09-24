@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, setAccessToken } from './http.js'
-import { BOARD_COLUMN_LIMIT, BOARD_STATUSES, getAttention, getBoard, getHotspots, getSummary, getTimings } from './reportService.js'
+import { BOARD_COLUMN_LIMIT, BOARD_STATUSES, getAttention, getBoard, getFlow, getHotspots, getSummary, getTimings } from './reportService.js'
 
 let fetchMock
 
@@ -72,6 +72,13 @@ describe('reportService', () =>
             `/api/incidents?assignee_id=6&status=open&limit=${BOARD_COLUMN_LIMIT}`,
             `/api/incidents?assignee_id=6&status=closed&sort=-updated_at&limit=${BOARD_COLUMN_LIMIT}`,
         ])
+    })
+
+    it('fetches the flow snapshots in one request', async () =>
+    {
+        fetchMock.mockImplementation(async () => json({ bucket: 'hour', points: [] }))
+        expect(await getFlow()).toEqual({ bucket: 'hour', points: [] })
+        expect(calls().map((call) => call.url)).toEqual(['/api/reports/flow'])
     })
 
     it('passes the server error envelope through', async () =>

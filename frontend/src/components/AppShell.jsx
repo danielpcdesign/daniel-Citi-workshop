@@ -21,6 +21,7 @@ export const MOBILE_QUERY = '(max-width: 767px)'
 const NAV = [
     { to: '/dashboard', label: 'Dashboard', roles: DASHBOARD_ROLES },
     { to: '/engineers', label: 'Engineers', roles: ['admin'] },
+    { to: '/facilities', label: 'Facilities', roles: ['admin'] },
     { to: '/tickets', label: 'My tickets' },
     { to: '/report', label: 'Report a problem' },
 ]
@@ -34,6 +35,7 @@ function navSx(isActive)
         fontWeight: 700,
         textDecoration: 'none',
         paddingBlock: '6px',
+        whiteSpace: 'nowrap',
         // the current page is marked by position (a rule under it), not colour alone
         borderBottom: `3px solid ${isActive ? tokens.plate : 'transparent'}`,
     }
@@ -76,30 +78,31 @@ export default function AppShell({ children })
                 component="header"
                 sx={{ bgcolor: 'background.paper', borderBottom: `1px solid ${tokens.rule}` }}
             >
-                <Box sx={{ maxWidth: pageWidth, mx: 'auto', px: { xs: 2, md: 4 }, height: 64, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Box sx={{ maxWidth: pageWidth, mx: 'auto', px: { xs: 2, md: 4 }, height: 64, display: 'flex', alignItems: 'center', gap: { md: 3, lg: 4 } }}>
                     <Typography
                         component={RouterLink}
                         to={homePath(user)}
                         variant="h5"
-                        sx={{ color: tokens.ink, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 1 }}
+                        sx={{ color: tokens.ink, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 1, whiteSpace: 'nowrap', flexShrink: 0 }}
                     >
                         <Box component="span" aria-hidden="true" sx={{ width: 14, height: 14, bgcolor: tokens.plate, borderRadius: '3px' }} />
                         ACME Facilities
                     </Typography>
                     {user && !isMobile && (
                         <>
-                            <Box component="nav" aria-label="Main" sx={{ display: 'flex', gap: 3 }}>
+                            <Box component="nav" aria-label="Main" sx={{ display: 'flex', gap: { md: 2.5, lg: 3 }, flexShrink: 0 }}>
                                 {nav.map((item) => (
                                     <NavLink key={item.to} to={item.to} style={({ isActive }) => navSx(isActive)}>
                                         {item.label}
                                     </NavLink>
                                 ))}
                             </Box>
-                            <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
-                                <Typography variant="body2" color="text.secondary">
+                            {/* the header stays one line: with an admin's five links, the name gives way first */}
+                            <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                                <Typography variant="body2" color="text.secondary" noWrap title={`${user.full_name}, ${ROLE_LABEL[user.role] || user.role}`}>
                                     {user.full_name}, {ROLE_LABEL[user.role] || user.role}
                                 </Typography>
-                                <Button variant="outlined" size="small" onClick={handleSignOut}>Sign out</Button>
+                                <Button variant="outlined" size="small" onClick={handleSignOut} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>Sign out</Button>
                             </Box>
                         </>
                     )}

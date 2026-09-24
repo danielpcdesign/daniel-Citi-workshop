@@ -12,6 +12,16 @@ export const tokens = {
     muted: '#4A5761',
 }
 
+// one colour per status for charts: red stays reserved for blocked, amber for work nobody has picked up yet
+export const statusColors = {
+    unassigned: tokens.signalAmber,
+    open: '#7FA3BA',
+    in_progress: tokens.plate,
+    blocked: tokens.signalRed,
+    resolved: '#5B8A6B',
+    closed: '#AEB9C1',
+}
+
 // radius grows with the size of the thing: tags < controls < surfaces < the incident plate
 export const radius = {
     tag: 3,

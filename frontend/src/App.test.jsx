@@ -19,12 +19,18 @@ vi.mock('./services/reportService.js', () => ({
     getAttention: vi.fn(() => new Promise(() => undefined)),
     getHotspots: vi.fn(() => new Promise(() => undefined)),
     getTimings: vi.fn(() => new Promise(() => undefined)),
+    getFlow: vi.fn(() => new Promise(() => undefined)),
 }))
 
 vi.mock('./services/engineerService.js', () => ({
     listEngineersByWorkload: vi.fn(() => new Promise(() => undefined)),
     getEngineer: vi.fn(() => new Promise(() => undefined)),
     setAvailability: vi.fn(),
+}))
+vi.mock('./services/facilityService.js', () => ({
+    listBuildings: vi.fn(() => new Promise(() => undefined)),
+    listFloors: vi.fn(),
+    listSeats: vi.fn(),
 }))
 vi.mock('./services/userService.js', () => ({ searchEmployees: vi.fn(() => new Promise(() => undefined)), changeRole: vi.fn() }))
 
@@ -108,6 +114,15 @@ describe('routing and guards', () =>
     {
         renderApp('/engineers/6', fakeAuth())
         expect(screen.getByTestId('location')).toHaveTextContent('/tickets')
+    })
+
+    it('opens facilities for an admin, and sends anyone else to their start page', async () =>
+    {
+        const { unmount } = renderApp('/facilities', fakeAuth({ user: ADMIN }))
+        expect(await screen.findByRole('heading', { name: 'Facilities', level: 1 })).toBeInTheDocument()
+        unmount()
+        renderApp('/facilities', fakeAuth({ user: ENGINEER }))
+        expect(screen.getByTestId('location')).toHaveTextContent('/dashboard')
     })
 
     it('shows the register page and a not-found page', () =>

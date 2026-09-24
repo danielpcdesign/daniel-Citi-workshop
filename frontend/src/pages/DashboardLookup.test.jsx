@@ -15,6 +15,7 @@ vi.mock('../services/reportService.js', () => ({
     getAttention: vi.fn(),
     getHotspots: vi.fn(),
     getTimings: vi.fn(),
+    getFlow: vi.fn(async () => ({ bucket: 'hour', statuses: [], points: [] })),
 }))
 vi.mock('../services/incidentService.js', () => ({ listIncidents: vi.fn(), getIncident: vi.fn() }))
 vi.mock('../services/facilityService.js', () => ({ listBuildings: vi.fn() }))
@@ -120,6 +121,7 @@ describe('Dashboard section nav', () =>
             'Needs attention / Right now',
             'Tickets by status',
             'How fast tickets move',
+            'How work flows',
             'Where problems occur',
             'Lookup tool',
             'History',

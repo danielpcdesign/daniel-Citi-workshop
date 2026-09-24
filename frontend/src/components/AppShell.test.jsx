@@ -29,21 +29,24 @@ describe('AppShell', () =>
         await waitFor(() => expect(hardNavigate).toHaveBeenCalledWith('/signin'))
     })
 
-    it('shows the engineers page to admins only, between Dashboard and My tickets', () =>
+    it('shows the engineers and facilities pages to admins only, between Dashboard and My tickets', () =>
     {
         renderPage(<AppShell><p>page</p></AppShell>, { auth: fakeAuth({ user: ADMIN }) })
         const nav = screen.getByRole('navigation', { name: 'Main' })
-        expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Dashboard', 'Engineers', 'My tickets', 'Report a problem'])
+        expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Dashboard', 'Engineers', 'Facilities', 'My tickets', 'Report a problem'])
         expect(within(nav).getByRole('link', { name: 'Engineers' })).toHaveAttribute('href', '/engineers')
+        expect(within(nav).getByRole('link', { name: 'Facilities' })).toHaveAttribute('href', '/facilities')
     })
 
     it('keeps the engineers page out of an engineer\'s and an employee\'s nav', () =>
     {
         const { unmount } = renderPage(<AppShell><p>page</p></AppShell>, { auth: fakeAuth({ user: ENGINEER }) })
         expect(screen.queryByRole('link', { name: 'Engineers' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'Facilities' })).not.toBeInTheDocument()
         unmount()
         renderPage(<AppShell><p>page</p></AppShell>, { auth: fakeAuth({ user: EMPLOYEE }) })
         expect(screen.queryByRole('link', { name: 'Engineers' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'Facilities' })).not.toBeInTheDocument()
     })
 
     it('keeps the dashboard out of an employee\'s nav', () =>

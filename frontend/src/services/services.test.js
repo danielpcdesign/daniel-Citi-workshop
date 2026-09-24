@@ -11,7 +11,7 @@ import {
     transitionIncident,
 } from './incidentService.js'
 import { addNote, deleteNote, editNote, listNotes } from './noteService.js'
-import { listBuildings, listFloors, listSeats } from './facilityService.js'
+import { archivePlace, createPlace, listBuildings, listFloors, listSeats, renamePlace } from './facilityService.js'
 import { getEngineer, listAvailableEngineers, listEngineers, listEngineersByWorkload, setAvailability } from './engineerService.js'
 import { changeRole, searchEmployees } from './userService.js'
 
@@ -132,6 +132,21 @@ describe('facility and engineer services', () =>
         expect(lastCall().url).toBe('/api/engineers?sort=name&limit=100')
         await listEngineersByWorkload()
         expect(lastCall().url).toBe('/api/engineers?sort=workload&limit=100')
+    })
+
+    it('adds, renames and archives places at each level', async () =>
+    {
+        fetchMock.mockImplementation(async () => new Response(null, { status: 204 }))
+        await createPlace('building', null, 'Annex')
+        expect(lastCall()).toEqual({ url: '/api/facilities/buildings', method: 'POST', body: { name: 'Annex' } })
+        await createPlace('floor', 2, 'Floor 1')
+        expect(lastCall()).toEqual({ url: '/api/facilities/buildings/2/floors', method: 'POST', body: { name: 'Floor 1' } })
+        await createPlace('seat', 5, '1-01')
+        expect(lastCall()).toEqual({ url: '/api/facilities/floors/5/seats', method: 'POST', body: { name: '1-01' } })
+        await renamePlace('floor', 5, 'Ground')
+        expect(lastCall()).toEqual({ url: '/api/facilities/floors/5', method: 'PUT', body: { name: 'Ground' } })
+        await archivePlace('seat', 9)
+        expect(lastCall()).toEqual({ url: '/api/facilities/seats/9', method: 'DELETE', body: undefined })
     })
 
     it('manages engineers and roles', async () =>

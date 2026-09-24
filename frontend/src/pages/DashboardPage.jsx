@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useRef, useState } from 'react'
 import { useMediaQuery } from 'react-responsive'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -16,23 +16,28 @@ import LookupHistory from '../components/LookupHistory.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import StatusBoard from '../components/StatusBoard.jsx'
 import SummaryPlate from '../components/SummaryPlate.jsx'
+import TicketDrawer from '../components/TicketDrawer.jsx'
 import TicketLookup from '../components/TicketLookup.jsx'
 import TimingTrack from '../components/TimingTrack.jsx'
 import { useActiveSection } from '../hooks/useActiveSection.js'
 import { useAuth } from '../hooks/useAuth.js'
 import { LIVE_POLL_MS, usePolling } from '../hooks/usePolling.js'
-import { getAttention, getBoard, getHotspots, getSummary, getTimings } from '../services/reportService.js'
+import { getAttention, getBoard, getFlow, getHotspots, getSummary, getTimings } from '../services/reportService.js'
 import { CATEGORY_LABEL, PRIORITY_LABEL, fmtRef } from '../utils/format.js'
 import { scrollToSection } from '../utils/scroll.js'
 import { radius, tokens } from '../theme.js'
 
 export const DASHBOARD_POLL_MS = LIVE_POLL_MS
 
+// the chart library is only needed by admins, and only for this section: it ships as its own chunk
+const FlowChart = lazy(() => import('../components/FlowChart.jsx'))
+
 // the section anchors the dashboard nav jumps to
 const SECTION = {
     now: 'dash-now',
     status: 'dash-status',
     timings: 'dash-timings',
+    flow: 'dash-flow',
     hotspots: 'dash-hotspots',
     lookup: 'dash-lookup',
     history: 'dash-history',
@@ -47,6 +52,7 @@ const NAV = {
         { id: SECTION.now, label: 'Needs attention / Right now' },
         { id: SECTION.status, label: 'Tickets by status' },
         { id: SECTION.timings, label: 'How fast tickets move' },
+        { id: SECTION.flow, label: 'How work flows' },
         { id: SECTION.hotspots, label: 'Where problems occur' },
         { id: SECTION.lookup, label: 'Lookup tool', children: LOOKUP_CHILDREN },
     ],
@@ -101,8 +107,16 @@ export default function DashboardPage()
     const timings = usePolling(loadTimings, null)
     const loadHotspots = useCallback(() => (isAdmin ? getHotspots() : Promise.resolve(null)), [isAdmin])
     const hotspots = usePolling(loadHotspots, null)
+    // 90 days of hourly snapshots: loaded when the page opens and on Refresh, never polled (AD-14)
+    const loadFlow = useCallback(() => (isAdmin ? getFlow() : Promise.resolve(null)), [isAdmin])
+    const flow = usePolling(loadFlow, null)
     // the breakdowns reuse the summary; its failure is already shown once, above the plate
     const summaryShown = { ...summary, error: null }
+
+    // the summary figure whose tickets are listed in the drawer; opening counts the openings so each starts fresh
+    const [drawer, setDrawer] = useState({ figure: null, opening: 0, open: false })
+    const openFigure = (figure) => setDrawer((previous) => ({ figure, opening: previous.opening + 1, open: true }))
+    const closeFigure = () => setDrawer((previous) => ({ ...previous, open: false }))
 
     // both start closed; the lookup asks the server for nothing until it has been opened once
     const [lookupOpen, setLookupOpen] = useState(false)
@@ -218,7 +232,7 @@ export default function DashboardPage()
                             action={<Button color="inherit" size="small" onClick={summary.reload}>Try again</Button>}
                         />
                         {summary.loading && !summary.data && <PageLoader label="Loading the summary" />}
-                        {summary.data && <SummaryPlate summary={summary.data} scopeNote={SCOPE[user.role]} />}
+                        {summary.data && <SummaryPlate summary={summary.data} scopeNote={SCOPE[user.role]} onOpen={openFigure} />}
                     </Box>
 
                     {isAdmin && (
@@ -271,6 +285,22 @@ export default function DashboardPage()
                                 {(data) => <TimingTrack timings={data} />}
                             </DashboardSection>
                         </Box>
+                        <Box id={SECTION.flow} tabIndex={-1} sx={anchorSx}>
+                            <DashboardSection
+                                id="flow-heading"
+                                title="How work flows"
+                                intro="How many tickets sat in each status over time. A widening band is work piling up there."
+                                action={<Button variant="outlined" size="small" onClick={flow.reload}>Refresh flow</Button>}
+                                state={flow}
+                                loadingLabel="Loading the flow"
+                            >
+                                {(data) => (
+                                    <Suspense fallback={<PageLoader label="Loading the chart" />}>
+                                        <FlowChart flow={data} />
+                                    </Suspense>
+                                )}
+                            </DashboardSection>
+                        </Box>
                         <Box id={SECTION.hotspots} tabIndex={-1} sx={anchorSx}>
                             <DashboardSection
                                 id="hotspots-heading"
@@ -285,6 +315,8 @@ export default function DashboardPage()
                         </Box>
                     </>
                 )}
+
+                <TicketDrawer figure={drawer.figure} opening={drawer.opening} open={drawer.open} onClose={closeFigure} />
 
                 <CollapsibleSection
                     id={SECTION.lookup}

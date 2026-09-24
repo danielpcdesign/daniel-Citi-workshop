@@ -12,6 +12,7 @@ vi.mock('../services/reportService.js', () => ({
     getAttention: vi.fn(),
     getHotspots: vi.fn(),
     getTimings: vi.fn(),
+    getFlow: vi.fn(async () => ({ bucket: 'hour', statuses: [], points: [] })),
 }))
 
 const STATUSES = ['unassigned', 'open', 'in_progress', 'blocked', 'resolved', 'closed']

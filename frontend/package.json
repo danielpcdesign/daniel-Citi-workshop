@@ -21,6 +21,7 @@
     "@fontsource/overpass": "^5.3.0",
     "@mui/icons-material": "^9.4.0",
     "@mui/material": "^9.4.0",
+    "@mui/x-charts": "^9.14.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-responsive": "^10.0.1",

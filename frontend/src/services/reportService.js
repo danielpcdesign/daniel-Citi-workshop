@@ -47,3 +47,9 @@ export async function getBoard({ statuses = BOARD_STATUSES, ...filters } = {}, o
     )))
     return statuses.map((status, index) => ({ status, items: pages[index].items, total: pages[index].total }))
 }
+
+// admin only; ~270 kB of hourly snapshots over 90 days, so it is fetched on demand and never polled (AD-14)
+export function getFlow(options = {})
+{
+    return http.get(`${BASE}/flow`, options)
+}
