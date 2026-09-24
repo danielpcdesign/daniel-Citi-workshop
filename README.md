@@ -29,7 +29,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M7 | Engineer profiles + assignment | Profiles linked to accounts, ticket assignment | Done locally — admins see every engineer's availability and live workload (sortable by capacity); engineers toggle their own availability; unavailable engineers get no new work. Assignment itself shipped in M5. 346 tests (100%), verified live |
 | M8 | Ticket notes | Threaded communication on an incident | Done locally — one chronological conversation per incident; blocked, reassignment, and escalation reasons appear in it; authors edit (marked edited) and delete their own; admins moderate, even on closed tickets. 367 tests (100%), verified live |
 | M9 | Search, filter, pagination | Server-side, shared across all three persona views | Done locally — every list shares one paging / sort / envelope implementation; incidents filter by status, priority, category, location, assignee, escalation, and text or ticket number, with each persona seeing only their slice. 372 tests (100%) |
-| M10 | Dashboards and reporting | Per-persona; counts by status/priority/assignee, hotspots, MTTA/MTTR | Not started |
+| M10 | Dashboards and reporting | Per-persona; counts by status/priority/assignee, hotspots, MTTA/MTTR | Done locally — per-persona summary, location hotspots, time to assign (= acknowledged) and time to resolve from history, blocked and escalated with reasons. How reporters are kept informed is left to the frontend (M12). 400 tests (100%), verified live |
 | M11 | Visual workflow | Per-incident stepper and a status-grouped board | Not started |
 | M12 | Responsive and accessible UI | Mobile and desktop, consistent interaction states | Not started |
 | M13 | Test suites | To the coverage targets in [Testing](#testing) | In progress — backend: 80 tests pass, 100% coverage, 80% gate passes (`.venv/bin/pytest`, 2026-09-23, uncommitted), now covering the AD-12 `http.py` entry wrapper and AD-16 `log.py` formatter; mutation spot-check confirms tests fail when the code they cover is broken. Frontend (Vitest/RTL) and E2E (Cypress) not started |
@@ -299,6 +299,7 @@ Open architecture decisions live in **`AGENTS.md` → Pending architecture decis
 | AD-16 | Logging | **One JSON line per request** (route pattern, status, duration, user and request ids) plus lines for domain events, so CloudWatch Logs Insights can query by field. The frontend tags each user action with an `X-Correlation-Id`, which links every log line it caused. Tokens, passwords, cookies and request bodies are never logged. |
 | AD-17 | Incident workflow | **Admin: any status to any other. Engineer (assigned tickets only): one step forward, plus unblocking. Employee: none.** Only admins close. New incidents start `Unassigned`; only admins assign, which moves them to `Open`. Reassignment goes back through `Unassigned` with a required reason, so every hand-off is in the history. See diagram below. |
 | AD-18 | Visual workflow | **MUI `Stepper` on each incident** (the requester's "where is my ticket?") **plus a status-grouped board** on the Admin/Engineer dashboard (the dispatcher's "what is stuck?"). Drag-to-transition only after the workflow is enforced server-side. |
+| AD-19 | Dashboards | **A read-only `reports` service counts in SQL:** a per-persona summary, location hotspots, timings, and an attention list of blocked and escalated tickets with their reasons. **Timings report time to assign and time to resolve**, reconstructed from the status history. **Acknowledgement is treated as assignment:** a ticket is only assigned after an admin reviews it, so time to assign answers both "how quickly acknowledged" and "how quickly assigned" from the brief. |
 | AD-20 | Priority and escalation | **Employees request a priority; admins set the working one.** Escalation is a request an employee makes and an admin grants or declines — granting changes nothing automatically, because what escalation means depends on the issue. Only its current status is stored on the incident; the employee's reason is posted into the ticket conversation. Pending requests appear on the admin dashboard. |
 | AD-21 | Registration and roles | **Anyone with an `acme.inc` address registers as an Employee — nothing else.** Admins promote users to Engineer or Admin, so every password is set by its owner. The first admin is seeded at deploy time by the private migration Lambda, from credentials held outside git. Demoting an engineer sends their active tickets back to `Unassigned` with a recorded reason. |
 | AD-22 | Facility hierarchy | **Three tables — buildings, floors, seats.** An incident names its building and optionally a floor and seat; composite foreign keys make the database reject a seat on the wrong floor. Locations are archived, never deleted, so hotspot history survives. Seat occupants are out of scope. |
@@ -455,6 +456,17 @@ Everyone who can see the incident can read and write its conversation (a `404` o
 | `PUT` | `/api/incidents/{id}/notes/{note_id}` | the author, not closed | `{body}`; sets `edited_at` |
 | `DELETE` | `/api/incidents/{id}/notes/{note_id}` | the author, or an admin (even when closed) | `204` soft delete |
 
+### Report endpoints (M10)
+
+| Method | Path | Access | Result |
+|---|---|---|---|
+| `GET` | `/api/reports/summary` | any role | counts by status, priority, category, escalation, and the oldest active ticket — over what the caller can see |
+| `GET` | `/api/reports/hotspots?status=&limit=` | admin | top buildings, floors, and seats by incident count (archived ones included and flagged) |
+| `GET` | `/api/reports/timings?status=` | admin | time to assign (= acknowledged) and time to resolve: count, median, average in seconds |
+| `GET` | `/api/reports/attention?limit=` | admin | blocked incidents with the reason from history; pending and granted escalations with the reporter's reason |
+
+Engineer availability and workload come from `GET /api/engineers?sort=workload` (M7).
+
 ### Live checks leave permanent rows
 
 Live checks go through the deployed Lambdas, which always use the `public` schema, so they cannot use the throwaway schemas the test suite uses. Anything they create that reaches `incident_status_history` can never be deleted — the append-only trigger refuses, which is the point of it. Live checks therefore use `live.*` email addresses and `Live …` names, and those rows are left in the dev database deliberately.
@@ -479,6 +491,7 @@ Recorded so the gaps are on the record rather than implied by silence. Each is a
 - **Restoring archived locations.** Archiving is final in the MVP: a restored building could collide with a newer one of the same name, and resolving that needs rules nobody asked for. An admin can create the location again (M6).
 - **Engineer specialties.** Engineers carry availability but not the categories they handle. No required question depends on it, and matching engineers to categories would need its own rules and a second migration (M7).
 - **Indexed text search.** `q` searches with `ILIKE`, which scans the table. At workshop scale that is instant; at real volume a `pg_trgm` trigram index is the upgrade path (M9).
+- **Dashboard caching.** Reports are computed live from the database on every request; at this scale that is fast, and precomputed tables would add a staleness problem for no gain (AD-19).
 - **Seat occupants.** Seats are places an incident happens, not places people are assigned to — the brief never maps people to seats, and users carry no `seat_id`. Modelling occupancy would add a second meaning to every seat for no question the app must answer (AD-22).
 
 ## Roadmap

@@ -1,20 +1,11 @@
 from shared.authz import User
+from shared.visibility import incident_visibility as visibility  # noqa: F401  (one rule for incidents and reports)
 
 import workflow
 from workflow import Incident
 
 REPORTER_FIELDS = frozenset({"title", "description", "category", "location"})
 ADMIN_FIELDS = REPORTER_FIELDS | {"priority"}
-
-
-# the AD-09 row filter, applied in SQL so no query can return a row the caller may not see.
-# roles inherit employee capabilities: an engineer sees what they reported *or* what is assigned to them
-def visibility(user: User) -> tuple[str, dict]:
-    if user.role == "admin":
-        return "deleted_at IS NULL", {}
-    if user.role == "engineer":
-        return "deleted_at IS NULL AND (reporter_id = %(me)s OR assignee_id = %(me)s)", {"me": user.id}
-    return "deleted_at IS NULL AND reporter_id = %(me)s", {"me": user.id}
 
 
 def can_view(user: User, incident: Incident) -> bool:
