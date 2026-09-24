@@ -14,6 +14,10 @@ vi.mock('../services/reportService.js', () => ({
     getTimings: vi.fn(),
 }))
 
+// the admin-only engineer panel; its own behaviour is covered in DashboardEngineers.test.jsx
+vi.mock('../services/engineerService.js', () => ({ listEngineersByWorkload: vi.fn(async () => ({ items: [], total: 0, page: 1, limit: 100 })) }))
+vi.mock('../services/userService.js', () => ({ searchEmployees: vi.fn(async () => ({ items: [], total: 0, page: 1, limit: 10 })), changeRole: vi.fn() }))
+
 const STATUSES = ['unassigned', 'open', 'in_progress', 'blocked', 'resolved', 'closed']
 
 function summaryFixture(overrides = {})

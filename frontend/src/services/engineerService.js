@@ -11,3 +11,15 @@ export function listEngineers(options = {})
 {
     return http.get('/api/engineers', { ...options, query: { sort: 'name', limit: 100 } })
 }
+
+// least loaded first: free capacity reads top down (M7, "how is work distributed")
+export function listEngineersByWorkload(options = {})
+{
+    return http.get('/api/engineers', { ...options, query: { sort: 'workload', limit: 100 } })
+}
+
+// unavailable means "no new work": tickets already held stay with the engineer (M7)
+export function setAvailability(engineerId, isAvailable, options = {})
+{
+    return http.put(`/api/engineers/${engineerId}/availability`, { is_available: isAvailable }, options)
+}

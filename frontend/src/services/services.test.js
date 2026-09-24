@@ -12,7 +12,8 @@ import {
 } from './incidentService.js'
 import { addNote, deleteNote, editNote, listNotes } from './noteService.js'
 import { listBuildings, listFloors, listSeats } from './facilityService.js'
-import { listAvailableEngineers, listEngineers } from './engineerService.js'
+import { listAvailableEngineers, listEngineers, listEngineersByWorkload, setAvailability } from './engineerService.js'
+import { changeRole, searchEmployees } from './userService.js'
 
 let fetchMock
 
@@ -129,5 +130,17 @@ describe('facility and engineer services', () =>
         expect(lastCall().url).toBe('/api/engineers?available=true&sort=workload&limit=100')
         await listEngineers()
         expect(lastCall().url).toBe('/api/engineers?sort=name&limit=100')
+        await listEngineersByWorkload()
+        expect(lastCall().url).toBe('/api/engineers?sort=workload&limit=100')
+    })
+
+    it('manages engineers and roles', async () =>
+    {
+        await setAvailability(5, false)
+        expect(lastCall()).toEqual({ url: '/api/engineers/5/availability', method: 'PUT', body: { is_available: false } })
+        await searchEmployees('ali')
+        expect(lastCall().url).toBe('/api/auth/users?q=ali&role=employee&sort=full_name&limit=10')
+        await changeRole(9, 'engineer')
+        expect(lastCall()).toEqual({ url: '/api/auth/users/9/role', method: 'PUT', body: { role: 'engineer' } })
     })
 })
