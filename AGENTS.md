@@ -1796,6 +1796,16 @@ The statement explicitly delegates this: "request or manage incident priority/es
   an open question for M7. 275 tests, 100%, incl. a full-lifecycle test asserting the whole
   history timeline row by row. Live: assign / acknowledge / engineer close 403 / blocked
   without reason 400 / resolve / admin close, with `actions.transitions` differing per caller.
+- **Phase D built (2026-09-23): escalation (AD-20).** `POST /{id}/escalation` `{reason}`
+  (reporter only, via `policy.can_request_escalation`: not `closed`, not already `pending`)
+  and `PUT /{id}/escalation` `{status, reason}` (admin; `none` / `granted` / `declined` from
+  any value; `pending` only by request; setting the current value is a `400`, since its note
+  would announce a change that did not happen). Every change posts an `escalation` note.
+  Granting changes nothing else — tested: priority and status untouched. **No dedicated
+  count endpoint:** the admin panel's pending count is the AD-13 list with
+  `escalation_status=pending&limit=1`, whose `total` is the count. 289 tests, 100%. Live:
+  request 200, second request 403, admin count 1, admin grant 200, reporter grant 403.
+- **M5 complete locally (2026-09-23).**
 
 ### AD-22 · Facility hierarchy modelling
 

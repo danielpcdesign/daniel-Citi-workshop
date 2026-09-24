@@ -24,7 +24,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | In progress — `001_init` applied locally through Terraform; 18 database-constraint cases pass (`backend/_migrate/tests/constraints.sql`). First-admin seeding built and verified locally (real deploys: no-vars fails, plaintext fails, valid hash seeds, redeploy is a no-op, taken email fails); remaining = cloud apply |
 | M3 | Authentication | Registration gated to `acme.inc`, password hashing, JWT issue and verify | Done locally — register (Employees only, exact `acme.inc`), login, refresh with rotation and reuse detection, sign-out, `/me`; RS256 verification in every service. Verified by 119 tests (100%) and live through `:3001` with a cookie jar. Cloud: bcrypt timing and the cookie field still to check |
 | M4 | Authorization | Three personas, role **and** row-level ownership; a shared enforcement *mechanism* with per-service *policy* (AD-09) | Role administration done — admins list users and change roles (promotion creates the engineer profile; demotion unassigns active tickets; the last admin cannot be removed). Persona access matrix tested for every route. Row-level ownership and transition authority land with M5 |
-| M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | In progress — rules and visibility (A); report / list / detail / edit / delete with filters, paging, triage sort (B); status changes and assignment with full history (C). Escalation next |
+| M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | Done locally — report, list (filters, paging, triage sort), detail with per-caller actions, edit, soft delete; status changes enforced by the AD-17 table with full history; assignment; escalation requests and admin decisions. 289 tests (100%), verified live on LocalStack |
 | M6 | Facilities CRUD | Building → floor → seat | Not started |
 | M7 | Engineer profiles + assignment | Profiles linked to accounts, ticket assignment | Not started |
 | M8 | Ticket notes | Threaded communication on an incident | Not started |
@@ -405,6 +405,20 @@ python3.13 -m venv .venv
 | `GET` | `/api/auth/me` | any role | `200` the caller; `401` without a valid `X-Access-Token` |
 | `GET` | `/api/auth/users?q=&role=` | admin | `200` users matching the search (at most 50 until pagination, AD-13) |
 | `PUT` | `/api/auth/users/{id}/role` | admin | `200` `{user, unassigned_incidents}`; one transaction — promotion creates the engineer profile, demotion returns active tickets to `Unassigned` with a reason; `409` for the last admin |
+
+### Incident endpoints (M5)
+
+| Method | Path | Access | Result |
+|---|---|---|---|
+| `POST` | `/api/incidents` | any role | `201`; starts `unassigned`; the reporter is always the caller |
+| `GET` | `/api/incidents?status=&priority=&category=&building_id=&floor_id=&seat_id=&assignee_id=&escalation_status=&q=&sort=&page=&limit=` | any role | `200` `{items, total, page, limit}` of what the caller may see; default order highest priority, then oldest |
+| `GET` | `/api/incidents/{id}` | any role | `200` with `actions` (what the caller may do); `404` if not visible |
+| `PUT` | `/api/incidents/{id}` | per field | reporter while `unassigned`; admin any time; `priority` admin only |
+| `DELETE` | `/api/incidents/{id}` | admin | `204` soft delete |
+| `POST` | `/api/incidents/{id}/transitions` | per AD-17 | `{to, reason?}`; `403` if not permitted, `400` if invalid for anyone |
+| `POST` | `/api/incidents/{id}/assignment` | admin | `{engineer_id}`; only from `unassigned`; target must be an engineer |
+| `POST` | `/api/incidents/{id}/escalation` | reporter | `{reason}` → `pending` |
+| `PUT` | `/api/incidents/{id}/escalation` | admin | `{status, reason}` — `none` / `granted` / `declined` |
 
 ### Live checks leave permanent rows
 

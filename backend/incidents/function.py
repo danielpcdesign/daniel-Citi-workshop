@@ -66,6 +66,28 @@ class TransitionIn(BaseModel):
     reason: str | None = None
 
 
+class EscalationRequestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str
+
+
+class EscalationDecisionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # pending is reachable only through a reporter's request (AD-20)
+    status: Literal["none", "granted", "declined"]
+    reason: str
+
+
+def _required_reason(reason: str) -> str:
+    reason = reason.strip()
+    if not reason:
+        # every escalation change posts a note with a reason (AD-20)
+        raise ValidationFailed("a reason is required", {"reason": "must not be empty"})
+    return reason
+
+
 class AssignmentIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -321,6 +343,49 @@ def assign(request: Request) -> tuple[int, dict]:
         if target is None or target[0] != "engineer":
             raise ValidationFailed("invalid assignee", {"engineer_id": f"user {data.engineer_id} is not an engineer"})
         apply_transition(conn, incident.id, "unassigned", "open", request.user.id, data.engineer_id, None)
+        row = load(conn, request.user, str(incident.id))
+    return 200, _to_json(row, request.user)
+
+
+def _set_escalation(conn: Connection, incident_id: int, actor_id: int, status: str, reason: str) -> None:
+    # the status is the only stored field; the reason lives in the conversation (AD-20)
+    conn.execute(
+        "UPDATE incidents SET escalation_status = %s, updated_at = now() WHERE id = %s", (status, incident_id)
+    )
+    conn.execute(
+        "INSERT INTO ticket_notes (incident_id, author_id, kind, body) VALUES (%s, %s, 'escalation', %s)",
+        (incident_id, actor_id, reason),
+    )
+
+
+# a reporter asks; what escalation means for this issue is the admin's call, so granting triggers nothing (AD-20)
+@router.on("POST", "/{incident_id}/escalation", roles=ANYONE)
+def request_escalation(request: Request) -> tuple[int, dict]:
+    reason = _required_reason(EscalationRequestIn.model_validate(request.body).reason)
+    conn = get_conn()
+    with conn.transaction():
+        row = load(conn, request.user, request.params["incident_id"], lock=True)
+        incident = _incident(row)
+        if not policy.can_request_escalation(request.user, incident):
+            raise Forbidden("you cannot request escalation of this incident now")
+        _set_escalation(conn, incident.id, request.user.id, "pending", reason)
+        row = load(conn, request.user, str(incident.id))
+    return 200, _to_json(row, request.user)
+
+
+# an admin decides, withdraws a grant, or reverses a decline: any value but pending, always with a reason
+@router.on("PUT", "/{incident_id}/escalation", roles={"admin"})
+def decide_escalation(request: Request) -> tuple[int, dict]:
+    data = EscalationDecisionIn.model_validate(request.body)
+    reason = _required_reason(data.reason)
+    conn = get_conn()
+    with conn.transaction():
+        row = load(conn, request.user, request.params["incident_id"], lock=True)
+        incident = _incident(row)
+        # a note announcing a change that did not happen would mislead the reporter
+        if incident.escalation_status == data.status:
+            raise ValidationFailed(f"escalation is already {data.status}", {"status": "must differ from the current value"})
+        _set_escalation(conn, incident.id, request.user.id, data.status, reason)
         row = load(conn, request.user, str(incident.id))
     return 200, _to_json(row, request.user)
 

@@ -403,3 +403,101 @@ def test_engineer_loses_visibility_of_a_ticket_taken_from_them(svc, world):
     give(svc, world, incident_id)
     move(svc, world, "ada", incident_id, "unassigned", "rebalancing")
     assert call(svc, world, "eve", "GET", f"/{incident_id}")[0] == 404
+
+
+# --- escalation (phase D, AD-20) --------------------------------------------------------------
+
+def escalate(svc, world, who, incident_id, reason="nobody has looked at this in days"):
+    return call(svc, world, who, "POST", f"/{incident_id}/escalation", {"reason": reason})
+
+
+def decide(svc, world, incident_id, status, reason="spoke to facilities", who="ada"):
+    return call(svc, world, who, "PUT", f"/{incident_id}/escalation", {"status": status, "reason": reason})
+
+
+def test_reporter_requests_escalation_with_a_note(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    status, body = escalate(svc, world, "alice", incident_id)
+    assert (status, body["escalation_status"]) == (200, "pending")
+    assert body["actions"]["request_escalation"] is False     # one pending request at a time
+    assert sql("SELECT kind, author_id, body FROM ticket_notes") == [
+        ("escalation", world["alice"], "nobody has looked at this in days")]
+
+
+def test_an_engineer_escalates_their_own_report(svc, world):
+    # roles inherit employee capabilities
+    incident_id = report(svc, world, who="eve")[1]["id"]
+    assert escalate(svc, world, "eve", incident_id)[0] == 200
+
+
+@pytest.mark.parametrize("who", ["ada", "eve"])
+def test_only_the_reporter_requests(svc, world, who):
+    incident_id = report(svc, world)[1]["id"]
+    give(svc, world, incident_id)   # so eve can see it
+    assert escalate(svc, world, who, incident_id)[0] == 403
+
+
+def test_no_second_request_while_pending_and_none_once_closed(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    escalate(svc, world, "alice", incident_id)
+    assert escalate(svc, world, "alice", incident_id)[0] == 403
+    sql("UPDATE incidents SET status = 'closed', assignee_id = %s, escalation_status = 'none' WHERE id = %s",
+        (world["eve"], incident_id))
+    assert escalate(svc, world, "alice", incident_id)[0] == 403
+
+
+@pytest.mark.parametrize("reason", ["", "   "])
+def test_a_request_needs_a_reason(svc, world, reason):
+    incident_id = report(svc, world)[1]["id"]
+    status, body = escalate(svc, world, "alice", incident_id, reason)
+    assert (status, body["error"]["fields"]) == (400, {"reason": "must not be empty"})
+
+
+def test_admin_decides_reverses_and_withdraws_always_with_a_note(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    escalate(svc, world, "alice", incident_id)
+    assert decide(svc, world, incident_id, "declined", "not urgent")[1]["escalation_status"] == "declined"
+    assert decide(svc, world, incident_id, "granted", "reconsidered")[1]["escalation_status"] == "granted"
+    assert decide(svc, world, incident_id, "none", "handled")[1]["escalation_status"] == "none"
+    assert [b for (b,) in sql("SELECT body FROM ticket_notes ORDER BY id")] == [
+        "nobody has looked at this in days", "not urgent", "reconsidered", "handled"]
+    # granting triggers nothing automatically: priority and assignment are untouched
+    assert sql("SELECT priority, status FROM incidents") == [(2, "unassigned")]
+
+
+def test_declined_lets_the_reporter_ask_again(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    escalate(svc, world, "alice", incident_id)
+    decide(svc, world, incident_id, "declined", "not urgent")
+    assert escalate(svc, world, "alice", incident_id, "it is now flooding")[1]["escalation_status"] == "pending"
+
+
+@pytest.mark.parametrize("status,reason,field", [
+    ("pending", "x", "status"),   # pending comes only from a request
+    ("granted", " ", "reason"),
+])
+def test_decision_validation(svc, world, status, reason, field):
+    incident_id = report(svc, world)[1]["id"]
+    code, body = decide(svc, world, incident_id, status, reason)
+    assert code == 400 and field in body["error"]["fields"]
+
+
+def test_setting_the_same_value_is_refused(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    code, body = decide(svc, world, incident_id, "none")
+    assert (code, body["error"]["message"]) == (400, "escalation is already none")
+    assert sql("SELECT count(*) FROM ticket_notes") == [(0,)]
+
+
+def test_only_admins_decide(svc, world):
+    incident_id = report(svc, world)[1]["id"]
+    assert decide(svc, world, incident_id, "granted", who="alice")[0] == 403
+
+
+def test_pending_panel_count_comes_from_the_list(svc, world):
+    # the admin dashboard needs no dedicated endpoint: filter + total (AD-13)
+    for _ in range(3):
+        escalate(svc, world, "alice", report(svc, world)[1]["id"])
+    report(svc, world)
+    _, body = call(svc, world, "ada", "GET", query="escalation_status=pending&limit=1")
+    assert (body["total"], len(body["items"])) == (3, 1)
