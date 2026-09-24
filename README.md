@@ -23,7 +23,7 @@ This document's structure is borrowed from an earlier banking project. The struc
 | M1 | Environment validated | VDI, `start-dev.sh`, hello-world service reachable on `:3001`, frontend on `:3000` | Done locally — `auth` answers through `:3001`, `X-Access-Token` reaches the handler. Cloud header check under OAC pending (M14) |
 | M2 | Schema and migrations | incidents, facilities, engineer profiles, notes, users — **plus the status-history table** | In progress — `001_init` applied locally through Terraform; 18 database-constraint cases pass (`backend/_migrate/tests/constraints.sql`). First-admin seeding built and verified locally (real deploys: no-vars fails, plaintext fails, valid hash seeds, redeploy is a no-op, taken email fails); remaining = cloud apply |
 | M3 | Authentication | Registration gated to `acme.inc`, password hashing, JWT issue and verify | Done locally — register (Employees only, exact `acme.inc`), login, refresh with rotation and reuse detection, sign-out, `/me`; RS256 verification in every service. Verified by 119 tests (100%) and live through `:3001` with a cookie jar. Cloud: bcrypt timing and the cookie field still to check |
-| M4 | Authorization | Three personas, role **and** row-level ownership, one shared enforcement point | Not started |
+| M4 | Authorization | Three personas, role **and** row-level ownership; a shared enforcement *mechanism* with per-service *policy* (AD-09) | Role administration done — admins list users and change roles (promotion creates the engineer profile; demotion unassigns active tickets; the last admin cannot be removed). Persona access matrix tested for every route. Row-level ownership and transition authority land with M5 |
 | M5 | Incident CRUD + workflow | The five statuses, with transitions enforced server-side | Not started |
 | M6 | Facilities CRUD | Building → floor → seat | Not started |
 | M7 | Engineer profiles + assignment | Profiles linked to accounts, ticket assignment | Not started |
@@ -71,7 +71,7 @@ The ordering is deliberate, and the reason is that the alternative is uniquely e
 | | Requirement |
 |---|---|
 | **M3 — authentication** | Registration restricted to `acme.inc`, validated server-side. Passwords hashed, never stored or returned in plaintext. Sign-in issues a signed JWT with an expiry. Every handler verifies the token before doing anything else, and rejects missing, malformed, expired, and wrongly-signed tokens distinctly enough to debug but not distinctly enough to probe. |
-| **M4 — authorization** | The three personas as roles. Role checks **and** row-level ownership — an Employee reaches their own incidents, an Engineer their assigned ones, an Admin everything — both enforced in one shared place rather than per handler. Workflow transitions authorized by role. A consistent `403` shape. |
+| **M4 — authorization** | The three personas as roles. Role checks **and** row-level ownership — an Employee reaches their own incidents, an Engineer their assigned ones, an Admin everything — enforced by one shared mechanism (the router's declared roles and the entry wrapper) with each service's own policy module, never ad-hoc checks per handler (AD-09). Workflow transitions authorized by role. A consistent `403` shape. |
 
 The remaining open sub-decisions are signing algorithm, where the signing secret lives, the hashing library, and refresh-token handling — **AD-07** and **AD-08** in `AGENTS.md`. The mechanism itself is not open.
 
@@ -402,6 +402,8 @@ python3.13 -m venv .venv
 | `POST` | `/api/auth/refresh` | cookie | `200` new access token and a rotated cookie; `401` if missing, forged, expired, or reused (reuse ends the whole session family) |
 | `DELETE` | `/api/auth/refresh` | cookie | `204`, revokes the session server-side and clears the cookie (sign-out lives here because the cookie is only ever sent to this path) |
 | `GET` | `/api/auth/me` | any role | `200` the caller; `401` without a valid `X-Access-Token` |
+| `GET` | `/api/auth/users?q=&role=` | admin | `200` users matching the search (at most 50 until pagination, AD-13) |
+| `PUT` | `/api/auth/users/{id}/role` | admin | `200` `{user, unassigned_incidents}`; one transaction — promotion creates the engineer profile, demotion returns active tickets to `Unassigned` with a reason; `409` for the last admin |
 
 ### Local gotcha: deploys fail until the first admin is configured
 

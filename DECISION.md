@@ -74,6 +74,8 @@ Unassigned ──(admin assigns)──▶ Open → In Progress → Resolved
 | Brute-force protection | Scope cut, no lockout | No rate-limiting infrastructure; lockout enables denial of service; bcrypt cost is the brake | 2026-09-23 |
 | bcrypt cost | 10 now; re-decide from a cloud measurement | LocalStack runs Lambdas without CPU limits, so local timing is meaningless; cost is stored per hash, so it can rise safely | 2026-09-23 |
 | Sign-out endpoint | `DELETE /api/auth/refresh` | The refresh cookie's path means the browser sends it nowhere else; sign-out must revoke server-side | 2026-09-23 |
+| M4 scope | Role administration + persona access matrix now; ownership and transitions with M5 | Ownership needs incidents to exist | 2026-09-23 |
+| Role administration | One admin endpoint in `auth` (`PUT /users/{id}/role`), one transaction; unassign operation in `_shared/incident_ops.py`; last admin cannot be removed | Atomic role changes; incident rules exist once; no lockout | 2026-09-23 |
 | Integration test database | Database-backed backend tests run against the **dev database**, not a separate test database; each test gets a throwaway PostgreSQL schema (`test_<random>`) created/dropped by the `isolated_schema` fixture (`backend/conftest.py`), with code under test pointed at it via `PGOPTIONS=-c search_path=<schema>` | One PostgreSQL to stand up locally, not two; the schema-per-test isolation keeps writes out of `public` without touching production connection code | 2026-09-23 |
 
 ## Rules settled beneath a parent decision

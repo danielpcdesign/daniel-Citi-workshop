@@ -269,3 +269,119 @@ def test_cloud_reads_the_key_from_secrets_manager_once(auth, monkeypatch):
 def test_health(auth, migrated_schema):
     response, body = call(auth, "GET", "")
     assert (response["statusCode"], body) == (200, {"service": "auth", "database": "ok"})
+
+
+# --- role administration (M4, AD-21) ----------------------------------------------------------
+
+def make_user(role: str, email: str) -> int:
+    with psycopg.connect(conn_str(), autocommit=True) as conn:
+        return conn.execute(
+            "INSERT INTO users (email, password_hash, full_name, role) VALUES (%s, 'x', %s, %s) RETURNING id",
+            (email, email.split("@")[0], role),
+        ).fetchone()[0]
+
+
+def token_for(auth, user_id: int, role: str) -> str:
+    return auth.tokens.issue_access(authz.User(user_id, role))
+
+
+@pytest.fixture
+def admin(auth, migrated_schema):
+    admin_id = make_user("admin", "boss@acme.inc")
+    return admin_id, token_for(auth, admin_id, "admin")
+
+
+def set_role(auth, token, user_id, role):
+    return call(auth, "PUT", f"/users/{user_id}/role", {"role": role}, token=token)
+
+
+def test_list_users_filters_by_search_and_role(auth, admin):
+    make_user("employee", "ana@acme.inc")
+    make_user("engineer", "bo@acme.inc")
+    _, token = admin
+    _, everyone = call(auth, "GET", "/users", token=token)
+    assert [u["email"] for u in everyone["items"]] == ["ana@acme.inc", "bo@acme.inc", "boss@acme.inc"]
+    event_q = {"rawPath": "/api/auth/users", "rawQueryString": "q=BO&role=engineer",
+               "requestContext": {"http": {"method": "GET"}}, "headers": {"x-access-token": token}}
+    found = json.loads(auth.handler(event_q, None)["body"])
+    assert [u["email"] for u in found["items"]] == ["bo@acme.inc"]
+
+
+def test_promotion_to_engineer_creates_the_profile(auth, admin):
+    admin_id, token = admin
+    user_id = make_user("employee", "ana@acme.inc")
+    response, body = set_role(auth, token, user_id, "engineer")
+    assert response["statusCode"] == 200
+    assert body["user"]["role"] == "engineer"
+    assert query("SELECT user_id, created_by, is_available FROM engineer_profiles") == [(user_id, admin_id, True)]
+
+
+def test_demotion_unassigns_active_work_and_removes_the_profile(auth, admin):
+    admin_id, token = admin
+    engineer_id = make_user("employee", "eng@acme.inc")
+    set_role(auth, token, engineer_id, "engineer")
+    with psycopg.connect(conn_str(), autocommit=True) as conn:
+        building = conn.execute("INSERT INTO buildings (name) VALUES ('HQ') RETURNING id").fetchone()[0]
+        ids = [conn.execute(
+            """INSERT INTO incidents (title, description, category, status, requested_priority, priority,
+                                      reporter_id, assignee_id, building_id)
+               VALUES ('t', 'd', 'hvac', %s, 2, 2, %s, %s, %s) RETURNING id""",
+            (status, admin_id, engineer_id, building)).fetchone()[0] for status in ("in_progress", "resolved")]
+    response, body = set_role(auth, token, engineer_id, "employee")
+    assert response["statusCode"] == 200
+    assert body["unassigned_incidents"] == [ids[0]]
+    assert query("SELECT count(*) FROM engineer_profiles") == [(0,)]
+    # resolved work keeps its assignee; the active ticket carries the reason in history and conversation
+    assert query("SELECT id, status, assignee_id FROM incidents ORDER BY id") == [
+        (ids[0], "unassigned", None), (ids[1], "resolved", engineer_id)]
+    assert query("SELECT reason FROM incident_status_history") == [("assignee removed from the engineer role",)]
+
+
+def test_the_last_admin_cannot_be_removed(auth, admin):
+    admin_id, token = admin
+    response, body = set_role(auth, token, admin_id, "employee")
+    assert (response["statusCode"], body["error"]["message"]) == (409, "the last admin cannot be removed")
+    assert query("SELECT role FROM users WHERE id = %s", (admin_id,)) == [("admin",)]
+
+
+def test_an_admin_can_step_down_when_another_exists(auth, admin):
+    admin_id, token = admin
+    second = make_user("employee", "deputy@acme.inc")
+    set_role(auth, token, second, "admin")
+    response, body = set_role(auth, token, admin_id, "employee")
+    assert (response["statusCode"], body["user"]["role"]) == (200, "employee")
+
+
+def test_same_role_is_a_no_op(auth, admin):
+    _, token = admin
+    user_id = make_user("employee", "ana@acme.inc")
+    response, body = set_role(auth, token, user_id, "employee")
+    assert (response["statusCode"], body["unassigned_incidents"]) == (200, [])
+
+
+@pytest.mark.parametrize("user_id,role,status", [
+    ("999999", "engineer", 404), ("not-a-number", "engineer", 404), ("{self}", "superuser", 400)])
+def test_role_change_rejects_bad_input(auth, admin, user_id, role, status):
+    admin_id, token = admin
+    target = user_id.replace("{self}", str(admin_id))
+    assert set_role(auth, token, target, role)[0]["statusCode"] == status
+
+
+# --- persona access matrix (M4) ----------------------------------------------------------------
+
+@pytest.mark.parametrize("method,path,expected", [
+    # (anonymous, employee, engineer, admin)
+    ("GET", "", (200, 200, 200, 200)),
+    ("GET", "/me", (401, 200, 200, 200)),
+    ("GET", "/users", (401, 403, 403, 200)),
+    ("PUT", "/users/{target}/role", (401, 403, 403, 200)),
+])
+def test_persona_access_matrix(auth, migrated_schema, method, path, expected):
+    target = make_user("employee", "target@acme.inc")
+    make_user("admin", "keeper@acme.inc")  # so role changes never trip the last-admin rule
+    tokens = [None] + [token_for(auth, make_user(role, f"{role}@acme.inc"), role)
+                       for role in ("employee", "engineer", "admin")]
+    body = {"role": "employee"} if method == "PUT" else None
+    statuses = tuple(call(auth, method, path.replace("{target}", str(target)), body, token=t)[0]["statusCode"]
+                     for t in tokens)
+    assert statuses == expected

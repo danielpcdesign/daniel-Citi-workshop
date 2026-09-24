@@ -1693,6 +1693,38 @@ The statement explicitly delegates this: "request or manage incident priority/es
   email already an employee → exit `1` "already registered as employee". Local DB has 0
   users after cleanup. **Cloud apply not yet run.**
 
+#### M4 scope and role administration (2026-09-23)
+
+- **M4 = role administration + a persona access matrix.** Roles, closed-by-default route
+  checks, and the `403`/`404` shape already exist (M3, AD-09, AD-12). Row-level ownership
+  and transition authority need incidents, so they land with M5 on the AD-09 pattern.
+- **Option A — one role endpoint in `auth`:** `PUT /api/auth/users/{id}/role`, admin only,
+  handles every change in one transaction: promotion to engineer creates the
+  `engineer_profiles` row; leaving the engineer role deletes it and auto-unassigns the
+  user's `open`/`in_progress`/`blocked` incidents. `GET /api/auth/users` lets admins find
+  people (provisional `q` / `role` filters and a 50-row cap until AD-13 settles
+  pagination).
+- **The unassign operation lives once, in `_shared/incident_ops.py`** — both `auth`
+  (demotion) and `incidents` (admin reassignment, AD-17) need it, which is exactly what
+  `_shared` is for. It moves the incident to `unassigned`, writes the history row with
+  the reason, and posts an `unassigned` note, inside the caller's transaction.
+  Rejected: splitting role changes between `auth` and `engineers` (B); demotion writing
+  its own incident SQL (C, the rules would exist twice).
+- **The last admin cannot be removed** (`409`): with no admin nobody can ever promote
+  anyone, and seeding only runs when no admin exists, so it could not recover.
+- **Built 2026-09-23.** `_shared/incident_ops.py` (`unassign`, `unassign_all_for`; locks the
+  incident row, skips `resolved`/`closed`/deleted, writes status + history + note in the
+  caller's transaction); `auth` `GET /users` and `PUT /users/{id}/role`. **Deadlock avoided
+  by lock ordering:** every role change first locks all admin rows `ORDER BY id`, then the
+  target — two admins demoting each other queue on the same locks and the second gets a
+  clean `409`, instead of each holding one lock and waiting on the other. *This is argued,
+  not tested:* a real test needs two concurrent requests on separate connections, which
+  the single-connection test harness cannot produce. Verified: 140 tests (100%) including
+  9 `incident_ops` tests (all three writes roll back together) and a persona access matrix
+  over every `auth` route × {anonymous, employee, engineer, admin}; live through `:3001` —
+  employee `403` on `/users`, admin search `200`, promotion `200` creates the profile,
+  sole-admin self-demotion `409`.
+
 ### AD-22 · Facility hierarchy modelling
 
 Buildings → floors → seats, with "recurring issues per building/floor/seat" as a required
